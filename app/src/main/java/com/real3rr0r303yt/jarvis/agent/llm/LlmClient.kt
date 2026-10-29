@@ -1,18 +1,22 @@
 package com.real3rr0r303yt.jarvis.agent.llm
 
+import com.real3rr0r303yt.jarvis.core.JarvisLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
 /** Supported LLM back-ends for the agent planner and the LLM brain tool. */
 enum class LlmProvider(val label: String, val defaultModel: String) {
     OPENAI("OpenAI", "gpt-4o-mini"),
-    GROQ("Groq", "llama-3.3-70b-versatile"),
-    GEMINI("Gemini", "gemini-3.8-flash"), // v1beta generateContent; 2.5-flash was deprecated
+    GROQ("Groq", "llama-3.1-8b-instant"),
+    GEMINI("Gemini", "gemini-3.8-flash"),
 }
 
 /** Immutable config read from settings. */
@@ -29,18 +33,53 @@ data class LlmConfig(
  * chat-completions schema; Gemini uses its generateContent endpoint. All calls
  * run on [Dispatchers.IO]. The API key is read from on-device settings and sent
  * only to the provider the user selected.
+ *
+ * Transient server failures (HTTP 429/5xx and network errors) are retried up to
+ * [MAX_ATTEMPTS] times with exponential backoff; permanent failures (e.g. 400,
+ * 401, 404) fail fast — retrying a bad model or key never helps.
  */
 class LlmClient(private val config: LlmConfig) {
 
     /** Sends a single system+user turn and returns the assistant text. */
     suspend fun complete(systemPrompt: String, userPrompt: String): String =
         withContext(Dispatchers.IO) {
-            when (config.provider) {
-                LlmProvider.OPENAI -> openAiStyle("https://api.openai.com/v1/chat/completions", systemPrompt, userPrompt)
-                LlmProvider.GROQ -> openAiStyle("https://api.groq.com/openai/v1/chat/completions", systemPrompt, userPrompt)
-                LlmProvider.GEMINI -> gemini(systemPrompt, userPrompt)
+            withRetry {
+                when (config.provider) {
+                    LlmProvider.OPENAI ->
+                        openAiStyle("https://api.openai.com/v1/chat/completions", systemPrompt, userPrompt)
+                    LlmProvider.GROQ ->
+                        openAiStyle("https://api.groq.com/openai/v1/chat/completions", systemPrompt, userPrompt)
+                    LlmProvider.GEMINI -> gemini(systemPrompt, userPrompt)
+                }
             }
         }
+
+    /** Runs [block], retrying transient failures with exponential backoff. */
+    private suspend fun <T> withRetry(block: () -> T): T {
+        var attempt = 0
+        while (true) {
+            attempt++
+            try {
+                return block()
+            } catch (e: LlmException) {
+                if (e.retryable && attempt < MAX_ATTEMPTS) {
+                    val backoff = BASE_BACKOFF_MS shl (attempt - 1) // 1s, 2s, 4s
+                    JarvisLog.warn("LLM ${config.provider.label} transient error (${e.message}); retry $attempt/$MAX_ATTEMPTS in ${backoff}ms")
+                    delay(backoff)
+                } else {
+                    throw e
+                }
+            } catch (e: IOException) {
+                if (attempt < MAX_ATTEMPTS) {
+                    val backoff = BASE_BACKOFF_MS shl (attempt - 1)
+                    JarvisLog.warn("LLM ${config.provider.label} network error (${e.message}); retry $attempt/$MAX_ATTEMPTS in ${backoff}ms")
+                    delay(backoff)
+                } else {
+                    throw LlmException("network error after $MAX_ATTEMPTS attempts: ${e.message}")
+                }
+            }
+        }
+    }
 
     private fun openAiStyle(endpoint: String, system: String, user: String): String {
         val body = JSONObject()
@@ -53,11 +92,15 @@ class LlmClient(private val config: LlmConfig) {
                     .put(JSONObject().put("role", "user").put("content", user)),
             )
         val json = post(endpoint, body, mapOf("Authorization" to "Bearer ${config.apiKey}"))
-        return json.getJSONArray("choices")
-            .getJSONObject(0)
-            .getJSONObject("message")
-            .getString("content")
-            .trim()
+        return try {
+            json.getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+                .trim()
+        } catch (e: JSONException) {
+            throw LlmException("unexpected ${config.provider.label} response: ${json.toString().take(200)}")
+        }
     }
 
     private fun gemini(system: String, user: String): String {
@@ -74,13 +117,22 @@ class LlmClient(private val config: LlmConfig) {
                 ),
             )
         val json = post(endpoint, body, emptyMap())
-        return json.getJSONArray("candidates")
-            .getJSONObject(0)
-            .getJSONObject("content")
-            .getJSONArray("parts")
-            .getJSONObject(0)
-            .getString("text")
-            .trim()
+        // A blocked prompt returns no candidates but a promptFeedback.blockReason.
+        val candidates = json.optJSONArray("candidates")
+        if (candidates == null || candidates.length() == 0) {
+            val reason = json.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty()
+            throw LlmException("Gemini returned no answer${if (reason.isNotBlank()) " (blocked: $reason)" else ""}")
+        }
+        return try {
+            candidates.getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts")
+                .getJSONObject(0)
+                .getString("text")
+                .trim()
+        } catch (e: JSONException) {
+            throw LlmException("unexpected Gemini response: ${json.toString().take(200)}")
+        }
     }
 
     private fun post(endpoint: String, body: JSONObject, headers: Map<String, String>): JSONObject {
@@ -93,18 +145,29 @@ class LlmClient(private val config: LlmConfig) {
             headers.forEach { (k, v) -> setRequestProperty(k, v) }
         }
         return try {
-            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
             if (code !in 200..299) {
-                throw LlmException("HTTP $code: ${text.take(300)}")
+                throw LlmException("HTTP $code: ${text.take(300)}", retryable = code in RETRYABLE_CODES)
             }
-            JSONObject(text)
+            try {
+                JSONObject(text)
+            } catch (e: JSONException) {
+                throw LlmException("invalid JSON from ${config.provider.label}: ${text.take(200)}")
+            }
         } finally {
             conn.disconnect()
         }
     }
+
+    private companion object {
+        const val MAX_ATTEMPTS = 3
+        const val BASE_BACKOFF_MS = 1000L
+        val RETRYABLE_CODES = setOf(429, 500, 502, 503, 504)
+    }
 }
 
-class LlmException(message: String) : Exception(message)
+/** Error from an LLM call; [retryable] marks transient server/overload failures. */
+class LlmException(message: String, val retryable: Boolean = false) : Exception(message)

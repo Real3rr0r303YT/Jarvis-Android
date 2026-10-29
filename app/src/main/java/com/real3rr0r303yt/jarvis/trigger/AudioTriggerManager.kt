@@ -83,6 +83,11 @@ class AudioTriggerManager(
                     AudioFormat.ENCODING_PCM_16BIT,
                     bufSize,
                 )
+                // Guard against an uninitialised recorder (mic busy / denied):
+                // startRecording() would otherwise throw IllegalStateException.
+                if (record.state != AudioRecord.STATE_INITIALIZED) {
+                    throw IllegalStateException("AudioRecord not initialised (mic unavailable)")
+                }
                 val buffer = ShortArray(bufSize / 2)
                 record.startRecording()
                 while (running) {
