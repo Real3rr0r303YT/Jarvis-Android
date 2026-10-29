@@ -20,6 +20,12 @@ android {
 
     buildTypes {
         release {
+            // Sign release builds so the published APK is installable via
+            // sideload. This uses the auto-generated debug keystore, which is
+            // fine for a personal, open-source build. For Play Store uploads or
+            // a stable update-signing identity, replace this with a dedicated
+            // keystore (e.g. loaded from CI secrets).
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
