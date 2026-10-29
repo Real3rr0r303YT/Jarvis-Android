@@ -12,11 +12,22 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Supported LLM back-ends for the agent planner and the LLM brain tool. */
-enum class LlmProvider(val label: String, val defaultModel: String) {
-    OPENAI("OpenAI", "gpt-4o-mini"),
-    GROQ("Groq", "llama-3.1-8b-instant"),
-    GEMINI("Gemini", "gemini-3.8-flash"),
+/**
+ * Supported LLM back-ends. [defaultModel] is the primary model; [fallbacks] are
+ * tried in order when the primary (or a user-set model) is rejected with a
+ * model-not-found (HTTP 404) — provider catalogues change, and a given key may
+ * lack access to the newest model, so we degrade gracefully instead of failing.
+ */
+enum class LlmProvider(
+    val label: String,
+    val defaultModel: String,
+    val fallbacks: List<String>,
+) {
+    OPENAI("OpenAI", "gpt-4o-mini", listOf("gpt-4o-mini")),
+    // Groq retired the Llama 3.1/3.3 chat models on free/dev tiers (2026-08-16);
+    // openai/gpt-oss-* are the current production text models.
+    GROQ("Groq", "openai/gpt-oss-20b", listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")),
+    GEMINI("Gemini", "gemini-3.8-flash", listOf("gemini-3.8-flash", "gemini-3.6-flash")),
 }
 
 /** Immutable config read from settings. */
@@ -34,24 +45,45 @@ data class LlmConfig(
  * run on [Dispatchers.IO]. The API key is read from on-device settings and sent
  * only to the provider the user selected.
  *
- * Transient server failures (HTTP 429/5xx and network errors) are retried up to
- * [MAX_ATTEMPTS] times with exponential backoff; permanent failures (e.g. 400,
- * 401, 404) fail fast — retrying a bad model or key never helps.
+ * Resilience:
+ *  - Transient failures (HTTP 429/5xx, network) are retried with exponential
+ *    backoff (up to [MAX_ATTEMPTS]).
+ *  - A model-not-found (HTTP 404) falls back to the next model in the chain
+ *    rather than aborting the agent; if every model is exhausted, a clear error
+ *    is surfaced to the action log.
+ *  - Other permanent failures (400/401) fail fast with a descriptive message.
  */
 class LlmClient(private val config: LlmConfig) {
+
+    /** Ordered, de-duplicated model chain: the configured model first, then fallbacks. */
+    private val modelChain: List<String> =
+        (listOf(config.model) + config.provider.fallbacks).distinct()
 
     /** Sends a single system+user turn and returns the assistant text. */
     suspend fun complete(systemPrompt: String, userPrompt: String): String =
         withContext(Dispatchers.IO) {
-            withRetry {
-                when (config.provider) {
-                    LlmProvider.OPENAI ->
-                        openAiStyle("https://api.openai.com/v1/chat/completions", systemPrompt, userPrompt)
-                    LlmProvider.GROQ ->
-                        openAiStyle("https://api.groq.com/openai/v1/chat/completions", systemPrompt, userPrompt)
-                    LlmProvider.GEMINI -> gemini(systemPrompt, userPrompt)
+            var lastError: LlmException? = null
+            for ((index, model) in modelChain.withIndex()) {
+                try {
+                    return@withContext withRetry { callModel(model, systemPrompt, userPrompt) }
+                } catch (e: LlmException) {
+                    if (e.modelNotFound && index < modelChain.lastIndex) {
+                        val next = modelChain[index + 1]
+                        JarvisLog.warn("LLM ${config.provider.label}: model '$model' unavailable (${e.message}); falling back to '$next'")
+                        lastError = e
+                    } else {
+                        throw e
+                    }
                 }
             }
+            throw lastError ?: LlmException("${config.provider.label}: no usable model configured")
+        }
+
+    private fun callModel(model: String, system: String, user: String): String =
+        when (config.provider) {
+            LlmProvider.OPENAI -> openAiStyle("https://api.openai.com/v1/chat/completions", model, system, user)
+            LlmProvider.GROQ -> openAiStyle("https://api.groq.com/openai/v1/chat/completions", model, system, user)
+            LlmProvider.GEMINI -> gemini(model, system, user)
         }
 
     /** Runs [block], retrying transient failures with exponential backoff. */
@@ -81,9 +113,9 @@ class LlmClient(private val config: LlmConfig) {
         }
     }
 
-    private fun openAiStyle(endpoint: String, system: String, user: String): String {
+    private fun openAiStyle(endpoint: String, model: String, system: String, user: String): String {
         val body = JSONObject()
-            .put("model", config.model)
+            .put("model", model)
             .put("temperature", 0.2)
             .put(
                 "messages",
@@ -103,9 +135,9 @@ class LlmClient(private val config: LlmConfig) {
         }
     }
 
-    private fun gemini(system: String, user: String): String {
+    private fun gemini(model: String, system: String, user: String): String {
         val endpoint =
-            "https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
+            "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${config.apiKey}"
         val body = JSONObject()
             .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             .put(
@@ -117,7 +149,6 @@ class LlmClient(private val config: LlmConfig) {
                 ),
             )
         val json = post(endpoint, body, emptyMap())
-        // A blocked prompt returns no candidates but a promptFeedback.blockReason.
         val candidates = json.optJSONArray("candidates")
         if (candidates == null || candidates.length() == 0) {
             val reason = json.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty()
@@ -150,7 +181,11 @@ class LlmClient(private val config: LlmConfig) {
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
             if (code !in 200..299) {
-                throw LlmException("HTTP $code: ${text.take(300)}", retryable = code in RETRYABLE_CODES)
+                throw LlmException(
+                    "HTTP $code: ${text.take(300)}",
+                    retryable = code in RETRYABLE_CODES,
+                    modelNotFound = code == 404,
+                )
             }
             try {
                 JSONObject(text)
@@ -169,5 +204,13 @@ class LlmClient(private val config: LlmConfig) {
     }
 }
 
-/** Error from an LLM call; [retryable] marks transient server/overload failures. */
-class LlmException(message: String, val retryable: Boolean = false) : Exception(message)
+/**
+ * Error from an LLM call.
+ * @param retryable transient server/overload failure worth a backoff retry.
+ * @param modelNotFound the model id was rejected (HTTP 404) — try the next model.
+ */
+class LlmException(
+    message: String,
+    val retryable: Boolean = false,
+    val modelNotFound: Boolean = false,
+) : Exception(message)
