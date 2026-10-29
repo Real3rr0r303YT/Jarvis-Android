@@ -2,6 +2,7 @@ package com.real3rr0r303yt.jarvis.brain
 
 import android.content.Context
 import com.real3rr0r303yt.jarvis.agent.AppAutomationTool
+import com.real3rr0r303yt.jarvis.agent.DocTool
 import com.real3rr0r303yt.jarvis.agent.JarvisAgentEngine
 import com.real3rr0r303yt.jarvis.agent.LlmBrainTool
 import com.real3rr0r303yt.jarvis.agent.SystemCheckTool
@@ -174,16 +175,25 @@ class CommandProcessor(appContext: Context) {
 
     private fun onOff(enabled: Boolean) = if (enabled) "an" else "aus"
 
-    /** ReAct agent path: plans and executes sub-steps via tools. */
+    /**
+     * Multi-agent path. [JarvisAgentEngine] is the **Planner agent**: it breaks
+     * a complex request into a Thought→Action→Observation plan and delegates to
+     * specialised sub-agents exposed as tools:
+     *  - **DocAgent** ([DocTool]) — generates PDFs/documents on device.
+     *  - **AutomationAgent** ([AppAutomationTool] + [SystemControlTool]) — drives
+     *    accessibility UI automation and system/intent actions.
+     *  - plus web search, on-device diagnostics, and a free-text brain.
+     */
     private suspend fun runAgent(input: String, config: LlmConfig): String {
-        JarvisLog.action("AGENT ENGAGED (${config.provider.label}) :: \"$input\"")
+        JarvisLog.action("PLANNER ENGAGED (${config.provider.label}) :: \"$input\"")
         val llm = LlmClient(config)
         val engine = JarvisAgentEngine(
             llm = llm,
             toolList = listOf(
                 WebSearchTool(),
-                AppAutomationTool(::runRuleBased),
-                SystemControlTool(::runRuleBased),
+                AppAutomationTool(::runRuleBased),   // AutomationAgent
+                SystemControlTool(::runRuleBased),   // AutomationAgent
+                DocTool(appContext),                 // DocAgent
                 SystemCheckTool(appContext),
                 LlmBrainTool(llm),
             ),
@@ -255,28 +265,46 @@ class CommandProcessor(appContext: Context) {
         val launched = if (action.appQuery.isNotBlank()) system.launchApp(action.appQuery) else true
         if (launched && action.appQuery.isNotBlank()) delay(1500) // let the app come up
 
-        // If a recipient was named, open their chat first (poll for the row).
+        // If a recipient was named, open their chat first via the app's search.
         if (action.recipient.isNotBlank()) {
-            var opened = false
-            repeat(CHAT_OPEN_ATTEMPTS) {
-                if (!opened) {
-                    if (a11y.tapByText(action.recipient)) {
-                        opened = true
-                    } else {
-                        delay(POLL_INTERVAL_MS)
-                    }
-                }
-            }
-            if (opened) delay(1000) else JarvisLog.warn("COMPOSE — chat \"${action.recipient}\" not found; typing into current screen")
+            openChat(a11y, action.recipient)
         }
 
-        // Poll for the editable field — it may not be focused immediately.
+        // Poll for the message input field — it may not be focused immediately.
         repeat(TYPE_ATTEMPTS) { attempt ->
             if (a11y.typeText(action.text)) return true
             if (attempt < TYPE_ATTEMPTS - 1) delay(POLL_INTERVAL_MS)
         }
-        JarvisLog.error("COMPOSE — no editable field appeared after ${TYPE_ATTEMPTS} attempts")
+        JarvisLog.error("COMPOSE — no editable field appeared after $TYPE_ATTEMPTS attempts")
         return false
+    }
+
+    /**
+     * Opens a chat with [recipient]: triggers the app's Search node, types the
+     * name into the search field, then taps the matching result row. Falls back
+     * to tapping the name directly if no search affordance is present. This is
+     * the WhatsApp node-targeting order that avoids FAIL COMPOSE.
+     */
+    private suspend fun openChat(a11y: JarvisAccessibilityService, recipient: String) {
+        // 1. Trigger search (content-description "Search"/"Suche").
+        val searchOpened = a11y.tapByContentDescription("Search") || a11y.tapByContentDescription("Suche")
+        if (searchOpened) {
+            delay(POLL_INTERVAL_MS)
+            // 2. Type the contact into the now-focused search field.
+            repeat(3) { attempt ->
+                if (a11y.typeText(recipient)) return@repeat
+                if (attempt < 2) delay(POLL_INTERVAL_MS)
+            }
+            delay(POLL_INTERVAL_MS)
+        }
+        // 3. Tap the matching chat row (polled; search results take a moment).
+        var opened = false
+        repeat(CHAT_OPEN_ATTEMPTS) {
+            if (!opened) {
+                if (a11y.tapByText(recipient)) opened = true else delay(POLL_INTERVAL_MS)
+            }
+        }
+        if (opened) delay(1000) else JarvisLog.warn("COMPOSE — chat \"$recipient\" not found; typing into current screen")
     }
 
     private fun notEnabled(): Boolean {

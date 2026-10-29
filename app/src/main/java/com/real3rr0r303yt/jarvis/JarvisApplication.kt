@@ -23,8 +23,11 @@ class JarvisApplication : Application() {
         instance = this
 
         // Text-to-speech, gated by the user's settings toggle.
+        val prefs = JarvisPrefs.get(this)
         TtsManager.init(this)
-        TtsManager.enabled = JarvisPrefs.get(this).ttsEnabled
+        TtsManager.enabled = prefs.ttsEnabled
+        TtsManager.onlineApiKey = prefs.ttsOnlineKey
+        TtsManager.onlineVoiceId = prefs.ttsVoiceId
 
         // Proactive app-launch handler: when a watched app opens, generate a
         // content draft, copy it to the clipboard (auto-drafting) and show it.

@@ -1,35 +1,54 @@
 package com.real3rr0r303yt.jarvis.tts
 
 import android.content.Context
+import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import com.real3rr0r303yt.jarvis.core.JarvisLog
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 
 /**
- * Process-wide Text-to-Speech output, tuned for a darker, precise "Jarvis"
- * system-AI vibe rather than the default robotic voice:
- *  - slightly lowered [PITCH] and marginally slower [SPEECH_RATE];
- *  - a preference for a high-quality, on-device voice in the user's locale
- *    (falling back to en-US, then the engine default).
+ * Process-wide Text-to-Speech output with two back-ends:
  *
- * Speaking is gated by [enabled]. All calls are safe before init completes
- * (they no-op) and after shutdown.
+ *  - **Local engine** (default): Android TextToSpeech tuned for a darker,
+ *    precise "Jarvis" vibe — lower [pitch], slightly slower rate, and the
+ *    highest-quality offline voice for the user's locale.
+ *  - **Online HQ voice** (optional): when an ElevenLabs API key + voice id are
+ *    set, synthesis is streamed from ElevenLabs for a natural, human voice and
+ *    played via MediaPlayer. Any failure falls back to the local engine, so
+ *    speech never silently breaks.
+ *
+ * Speaking is gated by [enabled]; all calls are safe before init and after
+ * shutdown.
  */
 object TtsManager {
 
-    private const val PITCH = 0.85f        // lower = deeper
-    private const val SPEECH_RATE = 0.98f  // a touch slower = more deliberate
-
     @Volatile private var tts: TextToSpeech? = null
     @Volatile private var ready = false
+    @Volatile private var appContext: Context? = null
+    @Volatile private var player: MediaPlayer? = null
 
     /** Mirrors the user's settings toggle; when false, [speak] does nothing. */
     @Volatile var enabled: Boolean = false
 
+    /** Local-engine voice tuning (exposed so settings can fine-tune the vibe). */
+    @Volatile var pitch: Float = 0.85f
+    @Volatile var speechRate: Float = 0.98f
+
+    /** Optional ElevenLabs online voice. When both are set, it's preferred. */
+    @Volatile var onlineApiKey: String = ""
+    @Volatile var onlineVoiceId: String = ""
+
+    private const val ELEVEN_MODEL = "eleven_multilingual_v2"
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (tts != null) return
-        val engine = TextToSpeech(context.applicationContext) { status ->
+        tts = TextToSpeech(context.applicationContext) { status ->
             ready = status == TextToSpeech.SUCCESS
             if (ready) {
                 applyVoiceProfile()
@@ -38,33 +57,24 @@ object TtsManager {
                 JarvisLog.warn("TTS engine init failed (status $status)")
             }
         }
-        tts = engine
     }
 
-    /** Applies pitch/rate and selects the best matching voice. */
     private fun applyVoiceProfile() {
         val engine = tts ?: return
         runCatching {
-            engine.setPitch(PITCH)
-            engine.setSpeechRate(SPEECH_RATE)
-
+            engine.setPitch(pitch)
+            engine.setSpeechRate(speechRate)
             val locale = Locale.getDefault().takeIf { localeSupported(engine, it) } ?: Locale.US
             engine.language = locale
-
-            selectBestVoice(engine, locale)?.let { voice ->
-                engine.voice = voice
-                JarvisLog.info("TTS voice: ${voice.name} (${voice.locale})")
-            }
-        }.onFailure { JarvisLog.warn("TTS voice profile could not be fully applied: ${it.message}") }
+            selectBestVoice(engine, locale)?.let { engine.voice = it }
+        }.onFailure { JarvisLog.warn("TTS voice profile not fully applied: ${it.message}") }
     }
 
-    /** Prefers a high-quality, offline voice for [locale]; else any for the language. */
     private fun selectBestVoice(engine: TextToSpeech, locale: Locale): Voice? {
         val voices = runCatching { engine.voices }.getOrNull()?.filterNotNull().orEmpty()
         if (voices.isEmpty()) return null
         val lang = locale.language
-        return voices
-            .filter { it.locale.language == lang && !it.isNetworkConnectionRequired && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+        return voices.filter { it.locale.language == lang && !it.isNetworkConnectionRequired }
             .maxByOrNull { it.quality }
             ?: voices.filter { it.locale.language == lang }.maxByOrNull { it.quality }
     }
@@ -76,20 +86,87 @@ object TtsManager {
             res == TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE
     }
 
-    /** Reads [text] aloud if TTS is enabled and ready. Long text is trimmed. */
+    /** Reads [text] aloud if enabled. Prefers the online HQ voice when configured. */
     fun speak(text: String) {
-        if (!enabled || !ready) return
-        val clean = text.trim().take(600)
+        if (!enabled) return
+        val clean = text.trim().take(800)
         if (clean.isEmpty()) return
-        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "jarvis-${System.currentTimeMillis()}")
+        if (onlineApiKey.isNotBlank() && onlineVoiceId.isNotBlank()) {
+            Thread({ speakOnline(clean) }, "jarvis-tts-online").start()
+        } else {
+            speakLocal(clean)
+        }
+    }
+
+    private fun speakLocal(text: String) {
+        if (!ready) return
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis-${System.currentTimeMillis()}")
+    }
+
+    /** Synthesises via ElevenLabs and plays the audio; falls back to local on error. */
+    private fun speakOnline(text: String) {
+        val ctx = appContext ?: return speakLocal(text)
+        val conn = try {
+            (URL("https://api.elevenlabs.io/v1/text-to-speech/$onlineVoiceId").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "audio/mpeg")
+                setRequestProperty("xi-api-key", onlineApiKey)
+            }
+        } catch (e: Exception) {
+            JarvisLog.warn("TTS online setup failed (${e.message}); using local voice")
+            return speakLocal(text)
+        }
+        try {
+            val body = JSONObject().put("text", text).put("model_id", ELEVEN_MODEL)
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                val err = conn.errorStream?.bufferedReader()?.use { it.readText() }?.take(200).orEmpty()
+                JarvisLog.warn("TTS online HTTP $code ($err); using local voice")
+                return speakLocal(text)
+            }
+            val out = File(ctx.cacheDir, "jarvis-tts.mp3")
+            conn.inputStream.use { input -> out.outputStream().use { input.copyTo(it) } }
+            playFile(out)
+        } catch (e: Exception) {
+            JarvisLog.warn("TTS online failed (${e.message}); using local voice")
+            speakLocal(text)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun playFile(file: File) {
+        try {
+            player?.release()
+            player = MediaPlayer().apply {
+                setDataSource(file.absolutePath)
+                setOnCompletionListener { it.release(); if (player === it) player = null }
+                prepare()
+                start()
+            }
+        } catch (e: Exception) {
+            JarvisLog.warn("TTS playback failed: ${e.message}")
+        }
+    }
+
+    /** Re-reads tuning and applies it to the local engine (call after settings change). */
+    fun refreshProfile() {
+        if (ready) applyVoiceProfile()
     }
 
     fun stop() {
-        tts?.stop()
+        runCatching { tts?.stop() }
+        runCatching { player?.release() }
+        player = null
     }
 
     fun shutdown() {
-        tts?.stop()
+        stop()
         tts?.shutdown()
         tts = null
         ready = false

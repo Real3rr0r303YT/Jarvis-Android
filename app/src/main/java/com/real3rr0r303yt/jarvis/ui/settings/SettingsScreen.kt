@@ -59,6 +59,8 @@ fun SettingsScreen(
     audioTrigger: Boolean,
     ttsEnabled: Boolean,
     overlayEnabled: Boolean,
+    ttsOnlineKeySet: Boolean,
+    ttsVoiceId: String,
     appLabel: (String) -> String,
     onBack: () -> Unit,
     onToggleEnforce: (Boolean) -> Unit,
@@ -76,6 +78,8 @@ fun SettingsScreen(
     onToggleAudioTrigger: (Boolean) -> Unit,
     onToggleTts: (Boolean) -> Unit,
     onToggleOverlay: (Boolean) -> Unit,
+    onSetTtsKey: (String) -> Unit,
+    onSetTtsVoiceId: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -214,6 +218,12 @@ fun SettingsScreen(
                 NeonSwitch(overlayEnabled, onToggleOverlay)
             }
             Hint("Overlay needs the \"draw over other apps\" permission; you'll be sent to grant it. Tap the floating chip for a quick voice command.")
+
+            Text("HIGH-QUALITY VOICE (ELEVENLABS)", color = JarvisNeon, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            StatusRow("ElevenLabs key", ttsOnlineKeySet)
+            AddRow("ElevenLabs API key (optional)", onSetTtsKey)
+            AddRow(if (ttsVoiceId.isBlank()) "voice id" else "voice id (${ttsVoiceId.take(8)}…)", onSetTtsVoiceId)
+            Hint("With a key + voice id, answers use the ElevenLabs online voice; otherwise the tuned local engine. Key stays on device.")
         }
 
         // --- App whitelist ---
