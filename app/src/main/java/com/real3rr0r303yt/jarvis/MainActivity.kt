@@ -208,6 +208,8 @@ class MainActivity : ComponentActivity() {
         var audioTrig by remember { mutableStateOf(prefs.audioTriggerEnabled) }
         var ttsOn by remember { mutableStateOf(prefs.ttsEnabled) }
         var overlayOn by remember { mutableStateOf(prefs.overlayEnabled) }
+        var ttsKeySet by remember { mutableStateOf(prefs.ttsOnlineKey.isNotBlank()) }
+        var ttsVoiceId by remember { mutableStateOf(prefs.ttsVoiceId) }
 
         var snapshot by remember { mutableStateOf(SystemStats.snapshot(context)) }
         LaunchedEffect(Unit) {
@@ -249,6 +251,8 @@ class MainActivity : ComponentActivity() {
                 audioTrigger = audioTrig,
                 ttsEnabled = ttsOn,
                 overlayEnabled = overlayOn,
+                ttsOnlineKeySet = ttsKeySet,
+                ttsVoiceId = ttsVoiceId,
                 appLabel = { pkg -> AppTriggerManager.label(pkg) },
                 onBack = { screen = Screen.DASHBOARD },
                 onToggleEnforce = { prefs.whitelistEnforced = it; enforce = it },
@@ -266,6 +270,8 @@ class MainActivity : ComponentActivity() {
                 onToggleAudioTrigger = { prefs.audioTriggerEnabled = it; audioTrig = it },
                 onToggleTts = { prefs.ttsEnabled = it; TtsManager.enabled = it; ttsOn = it },
                 onToggleOverlay = { overlayOn = setOverlay(it) },
+                onSetTtsKey = { prefs.ttsOnlineKey = it; TtsManager.onlineApiKey = it; ttsKeySet = it.isNotBlank() },
+                onSetTtsVoiceId = { prefs.ttsVoiceId = it; TtsManager.onlineVoiceId = it; ttsVoiceId = it },
                 modifier = modifier,
             )
         }

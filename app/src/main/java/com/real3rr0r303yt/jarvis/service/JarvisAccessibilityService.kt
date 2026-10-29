@@ -113,6 +113,25 @@ class JarvisAccessibilityService : AccessibilityService() {
         return ok
     }
 
+    /** Taps the first visible node whose content-description contains [desc]. */
+    fun tapByContentDescription(desc: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val node = findByContentDescription(root, desc) ?: return false
+        val clicked = clickNodeOrCenter(node)
+        JarvisLog.action("TAP(desc) \"$desc\" -> ${if (clicked) "ok" else "fail"}")
+        return clicked
+    }
+
+    private fun findByContentDescription(node: AccessibilityNodeInfo?, desc: String): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val cd = node.contentDescription?.toString()
+        if (cd != null && cd.contains(desc, ignoreCase = true) && node.isVisibleToUser) return node
+        for (i in 0 until node.childCount) {
+            findByContentDescription(node.getChild(i), desc)?.let { return it }
+        }
+        return null
+    }
+
     // --------------------------------------------------------------- helpers
     private fun findClickableByText(
         node: AccessibilityNodeInfo,

@@ -48,6 +48,16 @@ class JarvisPrefs private constructor(context: Context) {
         get() = prefs.getBoolean(KEY_OVERLAY, false)
         set(value) = prefs.edit().putBoolean(KEY_OVERLAY, value).apply()
 
+    /** Optional ElevenLabs API key for a high-quality online voice (local-only storage). */
+    var ttsOnlineKey: String
+        get() = prefs.getString(KEY_TTS_ONLINE_KEY, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_TTS_ONLINE_KEY, value.trim()).apply()
+
+    /** ElevenLabs voice id to use when an online key is set. */
+    var ttsVoiceId: String
+        get() = prefs.getString(KEY_TTS_VOICE_ID, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_TTS_VOICE_ID, value.trim()).apply()
+
     /** When true, launches/automation are restricted to the whitelist. */
     var whitelistEnforced: Boolean
         get() = prefs.getBoolean(KEY_ENFORCE, false)
@@ -105,6 +115,8 @@ class JarvisPrefs private constructor(context: Context) {
         private const val KEY_AUDIO_TRIGGER = "audio_trigger_enabled"
         private const val KEY_TTS = "tts_enabled"
         private const val KEY_OVERLAY = "overlay_enabled"
+        private const val KEY_TTS_ONLINE_KEY = "tts_online_key"
+        private const val KEY_TTS_VOICE_ID = "tts_voice_id"
 
         @Volatile
         private var INSTANCE: JarvisPrefs? = null
