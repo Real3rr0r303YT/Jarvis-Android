@@ -19,8 +19,15 @@ sealed interface JarvisAction {
     // --- Apps ---
     data class LaunchApp(val query: String) : JarvisAction
 
-    /** Type/send a message in the currently focused app via accessibility. */
-    data class ComposeMessage(val appQuery: String, val text: String) : JarvisAction
+    /**
+     * Type a message in an app via accessibility. [recipient] (optional) is a
+     * chat/contact to open first (e.g. "Anne" in WhatsApp) before typing.
+     */
+    data class ComposeMessage(
+        val appQuery: String,
+        val text: String,
+        val recipient: String = "",
+    ) : JarvisAction
 
     // --- On-screen automation ---
     data class TapText(val label: String) : JarvisAction

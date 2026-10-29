@@ -63,8 +63,16 @@ class IntentParser {
             // Compose/send a message ("schreib ...", "sende ... an whatsapp")
             matches(c, "schreib", "schreibe", "nachricht", "message", "text ", "send", "sende") -> {
                 val app = extractApp(clause)
-                val text = extractQuotedOrTail(clause)
-                JarvisAction.ComposeMessage(appQuery = app ?: "", text = text)
+                val recipient = extractRecipient(clause)
+                var text = extractQuotedOrTail(clause)
+                if (recipient.isNotBlank()) {
+                    // Drop a trailing "... an <recipient>" / "to <recipient>" from the text.
+                    text = text.replace(
+                        Regex("\\s+(an|to)\\s+${Regex.escape(recipient)}\\s*$", RegexOption.IGNORE_CASE),
+                        "",
+                    ).trim()
+                }
+                JarvisAction.ComposeMessage(appQuery = app ?: "", text = text, recipient = recipient)
             }
 
             // Launch an app ("öffne ...", "starte ...", "open ...")
@@ -107,6 +115,11 @@ class IntentParser {
         return Regex("(?:öffne|offne|starte|open|launch|start)\\s+([\\p{L}0-9._-]+)", RegexOption.IGNORE_CASE)
             .find(clause)?.groupValues?.get(1)
     }
+
+    /** A chat/contact named after "an"/"to" at the end of the clause (e.g. "...an Anne"). */
+    private fun extractRecipient(clause: String): String =
+        Regex("\\s(?:an|to)\\s+([\\p{L}][\\p{L} .'-]*)$", RegexOption.IGNORE_CASE)
+            .find(clause.trim())?.groupValues?.get(1)?.trim().orEmpty()
 
     /** Text in quotes, else everything after a "schreib/write/..." verb. */
     private fun extractQuotedOrTail(clause: String): String {

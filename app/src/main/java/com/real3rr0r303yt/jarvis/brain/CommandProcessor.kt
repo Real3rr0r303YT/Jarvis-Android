@@ -37,6 +37,10 @@ class CommandProcessor(appContext: Context) {
     private val system = SystemController(appContext)
     private val prefs = JarvisPrefs.get(appContext)
 
+    private val CHAT_OPEN_ATTEMPTS = 5
+    private val TYPE_ATTEMPTS = 6
+    private val POLL_INTERVAL_MS = 600L
+
     private val CONVERSATION_PERSONA =
         "You are Jarvis, a concise and friendly Android voice assistant for Real3rr0r303YT. " +
             "Reply in the user's language in one or two short, natural sentences suitable for being read aloud. " +
@@ -149,8 +153,11 @@ class CommandProcessor(appContext: Context) {
         val phrases = actions.mapNotNull { action ->
             when (action) {
                 is JarvisAction.LaunchApp -> "Öffne ${action.query}"
-                is JarvisAction.ComposeMessage ->
-                    if (action.appQuery.isNotBlank()) "Öffne ${action.appQuery}" else "Text wird eingegeben"
+                is JarvisAction.ComposeMessage -> when {
+                    action.recipient.isNotBlank() -> "Schreibe an ${action.recipient}"
+                    action.appQuery.isNotBlank() -> "Öffne ${action.appQuery}"
+                    else -> "Text wird eingegeben"
+                }
                 is JarvisAction.SetWifi -> "WLAN ${onOff(action.enabled)}"
                 is JarvisAction.SetBluetooth -> "Bluetooth ${onOff(action.enabled)}"
                 is JarvisAction.SetVolume -> "Lautstärke ${action.percent} Prozent"
@@ -217,21 +224,9 @@ class CommandProcessor(appContext: Context) {
         is JarvisAction.LaunchApp ->
             if (allowed(action.query)) system.launchApp(action.query) else blocked(action.query)
 
-        is JarvisAction.ComposeMessage -> {
-            if (action.appQuery.isNotBlank() && !allowed(action.appQuery)) {
-                blocked(action.appQuery)
-            } else {
-                // Open the target app, wait for it, then type and leave sending to
-                // the user (we type the text; we do not auto-fire the send button
-                // unless the user explicitly asked to "send").
-                val launched = if (action.appQuery.isNotBlank()) system.launchApp(action.appQuery) else true
-                if (launched) delay(1200)
-                JarvisAccessibilityService.instance?.typeText(action.text) ?: run {
-                    JarvisLog.error("COMPOSE — accessibility service not enabled")
-                    false
-                }
-            }
-        }
+        is JarvisAction.ComposeMessage ->
+            if (action.appQuery.isNotBlank() && !allowed(action.appQuery)) blocked(action.appQuery)
+            else composeMessage(action)
 
         is JarvisAction.TapText ->
             JarvisAccessibilityService.instance?.tapByText(action.label) ?: notEnabled()
@@ -246,6 +241,42 @@ class CommandProcessor(appContext: Context) {
             JarvisLog.warn("UNRECOGNISED command: \"${action.raw}\"")
             false
         }
+    }
+
+    /**
+     * Opens the target app, optionally taps the named chat/contact, then types
+     * the text. After launching, WhatsApp (and similar apps) take a moment and
+     * the input field isn't focused yet — so we poll the accessibility service
+     * instead of giving up on the first attempt. We type but never auto-send.
+     */
+    private suspend fun composeMessage(action: JarvisAction.ComposeMessage): Boolean {
+        val a11y = JarvisAccessibilityService.instance ?: return notEnabled()
+
+        val launched = if (action.appQuery.isNotBlank()) system.launchApp(action.appQuery) else true
+        if (launched && action.appQuery.isNotBlank()) delay(1500) // let the app come up
+
+        // If a recipient was named, open their chat first (poll for the row).
+        if (action.recipient.isNotBlank()) {
+            var opened = false
+            repeat(CHAT_OPEN_ATTEMPTS) {
+                if (!opened) {
+                    if (a11y.tapByText(action.recipient)) {
+                        opened = true
+                    } else {
+                        delay(POLL_INTERVAL_MS)
+                    }
+                }
+            }
+            if (opened) delay(1000) else JarvisLog.warn("COMPOSE — chat \"${action.recipient}\" not found; typing into current screen")
+        }
+
+        // Poll for the editable field — it may not be focused immediately.
+        repeat(TYPE_ATTEMPTS) { attempt ->
+            if (a11y.typeText(action.text)) return true
+            if (attempt < TYPE_ATTEMPTS - 1) delay(POLL_INTERVAL_MS)
+        }
+        JarvisLog.error("COMPOSE — no editable field appeared after ${TYPE_ATTEMPTS} attempts")
+        return false
     }
 
     private fun notEnabled(): Boolean {
