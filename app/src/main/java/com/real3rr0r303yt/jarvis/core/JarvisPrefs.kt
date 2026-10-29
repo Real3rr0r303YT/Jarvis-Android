@@ -28,6 +28,21 @@ class JarvisPrefs private constructor(context: Context) {
         get() = prefs.getBoolean(KEY_ENFORCE, false)
         set(value) = prefs.edit().putBoolean(KEY_ENFORCE, value).apply()
 
+    /** When true and an API key is set, complex commands route to the agent engine. */
+    var agentEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AGENT, false)
+        set(value) = prefs.edit().putBoolean(KEY_AGENT, value).apply()
+
+    /** Selected LLM provider name (one of LlmProvider.name); defaults to OPENAI. */
+    var llmProvider: String
+        get() = prefs.getString(KEY_PROVIDER, "OPENAI") ?: "OPENAI"
+        set(value) = prefs.edit().putString(KEY_PROVIDER, value).apply()
+
+    /** API key for the selected provider. Stored only on this device. */
+    var llmApiKey: String
+        get() = prefs.getString(KEY_API_KEY, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_API_KEY, value.trim()).apply()
+
     fun addToWhitelist(app: String) = mutate(KEY_WHITELIST, _whitelist) { it + app.trim() }
     fun removeFromWhitelist(app: String) = mutate(KEY_WHITELIST, _whitelist) { it - app }
 
@@ -58,6 +73,9 @@ class JarvisPrefs private constructor(context: Context) {
         private const val KEY_WHITELIST = "app_whitelist"
         private const val KEY_COMMANDS = "custom_commands"
         private const val KEY_ENFORCE = "whitelist_enforced"
+        private const val KEY_AGENT = "agent_enabled"
+        private const val KEY_PROVIDER = "llm_provider"
+        private const val KEY_API_KEY = "llm_api_key"
 
         @Volatile
         private var INSTANCE: JarvisPrefs? = null
