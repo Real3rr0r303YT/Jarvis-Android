@@ -87,22 +87,28 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Types [text] into the currently focused editable field. */
+    /**
+     * Types [text] into an editable field. Prefers the focused input, else the
+     * first editable node in the tree; focuses it first so `ACTION_SET_TEXT`
+     * lands reliably. Returns false (without logging an error) when no editable
+     * field exists yet — the caller may poll and retry while the app settles.
+     */
     fun typeText(text: String): Boolean {
-        val focused = rootInActiveWindow
+        val target = rootInActiveWindow
             ?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             ?: findFirstEditable(rootInActiveWindow)
-        if (focused == null) {
-            JarvisLog.error("TYPE — no editable field focused")
-            return false
-        }
+        if (target == null) return false
+
+        // Make sure the field is focused before writing (chat inputs often
+        // aren't focused immediately after the chat opens).
+        if (!target.isFocused) target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {
             putCharSequence(
                 AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
                 text,
             )
         }
-        val ok = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val ok = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         JarvisLog.action("TYPE \"${text.take(40)}\" -> ${if (ok) "ok" else "failed"}")
         return ok
     }
@@ -125,7 +131,8 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     private fun findFirstEditable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (node == null) return null
-        if (node.isEditable) return node
+        val isEditText = node.className?.toString()?.contains("EditText", ignoreCase = true) == true
+        if (node.isEditable || isEditText) return node
         for (i in 0 until node.childCount) {
             findFirstEditable(node.getChild(i))?.let { return it }
         }
