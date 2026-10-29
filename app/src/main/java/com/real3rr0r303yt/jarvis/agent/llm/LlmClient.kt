@@ -12,7 +12,7 @@ import java.net.URL
 enum class LlmProvider(val label: String, val defaultModel: String) {
     OPENAI("OpenAI", "gpt-4o-mini"),
     GROQ("Groq", "llama-3.3-70b-versatile"),
-    GEMINI("Gemini", "gemini-2.5-flash"), // v1beta generateContent; 1.5-flash was retired
+    GEMINI("Gemini", "gemini-3.8-flash"), // v1beta generateContent; 2.5-flash was deprecated
 }
 
 /** Immutable config read from settings. */
