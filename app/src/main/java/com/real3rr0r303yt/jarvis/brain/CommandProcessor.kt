@@ -37,6 +37,11 @@ class CommandProcessor(appContext: Context) {
     private val system = SystemController(appContext)
     private val prefs = JarvisPrefs.get(appContext)
 
+    private val CONVERSATION_PERSONA =
+        "You are Jarvis, a concise and friendly Android voice assistant for Real3rr0r303YT. " +
+            "Reply in the user's language in one or two short, natural sentences suitable for being read aloud. " +
+            "No markdown, no lists."
+
     /** Builds the current LLM config from settings, or null if unconfigured. */
     private fun llmConfig(): LlmConfig? {
         val key = prefs.llmApiKey
@@ -95,15 +100,72 @@ class CommandProcessor(appContext: Context) {
      */
     suspend fun process(input: String): String {
         val config = llmConfig()
-        return if (prefs.agentEnabled && config != null) {
-            runAgent(input, config)
-        } else {
-            if (prefs.agentEnabled && config == null) {
-                JarvisLog.warn("AGENT enabled but no API key set — using rule-based mode")
-            }
-            runRuleBased(input)
+        if (prefs.agentEnabled && config != null) {
+            return runAgent(input, config)
         }
+        if (prefs.agentEnabled && config == null) {
+            JarvisLog.warn("AGENT enabled but no API key set — using rule-based mode")
+        }
+
+        // Rule-based path with voice feedback. If the parser recognises nothing
+        // (e.g. smalltalk like "hey Jarvis"), hand off to the LLM for a spoken
+        // reply instead of just warning.
+        val parsed = parser.parse(input)
+        JarvisLog.info("PARSE \"$input\" -> ${parsed.actions.size} action(s)")
+        if (parsed.actions.all { it is JarvisAction.Unknown }) {
+            return handleConversational(input, config)
+        }
+        TtsManager.speak(spokenConfirmation(parsed.actions))
+        return executeParsed(parsed.actions)
     }
+
+    /**
+     * Handles input the rule parser didn't recognise: routes it to the selected
+     * LLM for a normal conversational answer and reads it aloud. Falls back to a
+     * short spoken hint when no API key is configured.
+     */
+    private suspend fun handleConversational(input: String, config: LlmConfig?): String {
+        if (config == null) {
+            JarvisLog.warn("UNRECOGNISED \"$input\" — no LLM configured for a reply")
+            TtsManager.speak("Ich brauche einen API-Schlüssel in den Einstellungen, um das zu beantworten.")
+            return "Not recognised and no LLM configured. Set an API key in Settings."
+        }
+        JarvisLog.action("SMALLTALK -> ${config.provider.label}: \"$input\"")
+        val answer = try {
+            LlmClient(config).complete(CONVERSATION_PERSONA, input)
+        } catch (e: Exception) {
+            JarvisLog.error("LLM reply failed: ${e.message}")
+            val msg = "Sorry, I couldn't get a reply (${e.message})."
+            TtsManager.speak("Entschuldige, ich konnte gerade keine Antwort abrufen.")
+            return msg
+        }
+        JarvisLog.info("JARVIS: ${answer.take(200)}")
+        TtsManager.speak(answer)
+        return answer
+    }
+
+    /** A short, speakable confirmation for the recognised actions. */
+    private fun spokenConfirmation(actions: List<JarvisAction>): String {
+        val phrases = actions.mapNotNull { action ->
+            when (action) {
+                is JarvisAction.LaunchApp -> "Öffne ${action.query}"
+                is JarvisAction.ComposeMessage ->
+                    if (action.appQuery.isNotBlank()) "Öffne ${action.appQuery}" else "Text wird eingegeben"
+                is JarvisAction.SetWifi -> "WLAN ${onOff(action.enabled)}"
+                is JarvisAction.SetBluetooth -> "Bluetooth ${onOff(action.enabled)}"
+                is JarvisAction.SetVolume -> "Lautstärke ${action.percent} Prozent"
+                is JarvisAction.SetBrightness -> "Helligkeit ${action.percent} Prozent"
+                is JarvisAction.SetPowerSaver -> "Energiesparmodus ${onOff(action.enabled)}"
+                is JarvisAction.TapText -> "Tippe auf ${action.label}"
+                JarvisAction.Back -> "Zurück"
+                JarvisAction.Home -> "Startbildschirm"
+                is JarvisAction.Unknown -> null
+            }
+        }
+        return phrases.joinToString(", ").ifBlank { "Erledigt" }
+    }
+
+    private fun onOff(enabled: Boolean) = if (enabled) "an" else "aus"
 
     /** ReAct agent path: plans and executes sub-steps via tools. */
     private suspend fun runAgent(input: String, config: LlmConfig): String {
@@ -125,17 +187,25 @@ class CommandProcessor(appContext: Context) {
         return answer
     }
 
-    /** Offline rule-based path; also the executor the agent's device tools reuse. */
+    /**
+     * Offline rule-based executor used by the agent's device tools. Parses and
+     * runs the actions without voice feedback (the agent speaks its own final
+     * answer), so tool calls don't double-narrate.
+     */
     suspend fun runRuleBased(input: String): String {
         val parsed = parser.parse(input)
         JarvisLog.info("PARSE \"$input\" -> ${parsed.actions.size} action(s)")
+        return executeParsed(parsed.actions)
+    }
 
+    /** Executes a parsed action list; returns a short summary for the HUD. */
+    private suspend fun executeParsed(actions: List<JarvisAction>): String {
         var ok = 0
-        for (action in parsed.actions) {
+        for (action in actions) {
             if (execute(action)) ok++
             delay(300) // let the UI/screen settle between chained actions
         }
-        return "Executed $ok/${parsed.actions.size} action(s)"
+        return "Executed $ok/${actions.size} action(s)"
     }
 
     private suspend fun execute(action: JarvisAction): Boolean = when (action) {
