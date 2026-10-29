@@ -21,6 +21,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Floating overlay HUD (draw over other apps; user-granted in Settings) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- System state the SystemController reads / toggles -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
@@ -99,6 +102,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the user's own automation agent running to monitor device state and execute user-issued commands." />
         </service>
+
+        <!-- Floating overlay HUD service (manages a WindowManager overlay view). -->
+        <service
+            android:name=".overlay.OverlayHudService"
+            android:exported="false" />
 
         <!-- Shizuku provider (optional elevated permissions). -->
         <provider

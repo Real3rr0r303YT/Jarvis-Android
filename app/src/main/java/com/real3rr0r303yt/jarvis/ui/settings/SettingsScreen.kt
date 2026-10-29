@@ -57,6 +57,8 @@ fun SettingsScreen(
     appTriggers: Set<String>,
     triggerPresets: List<Pair<String, String>>,
     audioTrigger: Boolean,
+    ttsEnabled: Boolean,
+    overlayEnabled: Boolean,
     appLabel: (String) -> String,
     onBack: () -> Unit,
     onToggleEnforce: (Boolean) -> Unit,
@@ -72,6 +74,8 @@ fun SettingsScreen(
     onAddAppTrigger: (String) -> Unit,
     onRemoveAppTrigger: (String) -> Unit,
     onToggleAudioTrigger: (Boolean) -> Unit,
+    onToggleTts: (Boolean) -> Unit,
+    onToggleOverlay: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -179,6 +183,37 @@ fun SettingsScreen(
                 NeonSwitch(audioTrigger, onToggleAudioTrigger)
             }
             Hint("Background mic listens for sound activity (amplitude-based) while monitoring is on. Requires mic permission; toggle background monitoring to apply.")
+        }
+
+        // --- Voice output & overlay ---
+        Section("VOICE OUTPUT & OVERLAY") {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Read answers aloud (TTS)",
+                    color = JarvisNeonDim,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                NeonSwitch(ttsEnabled, onToggleTts)
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Floating overlay HUD",
+                    color = JarvisNeonDim,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                NeonSwitch(overlayEnabled, onToggleOverlay)
+            }
+            Hint("Overlay needs the \"draw over other apps\" permission; you'll be sent to grant it. Tap the floating chip for a quick voice command.")
         }
 
         // --- App whitelist ---

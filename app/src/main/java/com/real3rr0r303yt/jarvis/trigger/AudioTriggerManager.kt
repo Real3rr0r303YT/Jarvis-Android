@@ -68,41 +68,45 @@ class AudioTriggerManager(
             return
         }
         val bufSize = maxOf(minBuf, sampleRate / 4 * 2) // ~0.25s window
-        val record = try {
-            AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufSize,
-            )
-        } catch (e: Exception) {
-            JarvisLog.error("AUDIO TRIGGER — cannot open mic: ${e.message}")
-            running = false
-            return
-        }
-
-        val buffer = ShortArray(bufSize / 2)
         var lastFired = 0L
-        try {
-            record.startRecording()
-            while (running) {
-                val read = record.read(buffer, 0, buffer.size)
-                if (read <= 0) continue
-                val rms = rms(buffer, read)
-                val now = System.currentTimeMillis()
-                if (rms >= threshold && now - lastFired >= cooldownMs) {
-                    lastFired = now
-                    JarvisLog.action("AUDIO EVENT detected (level ${rms.toInt()})")
-                    runCatching { onActivity() }
-                        .onFailure { JarvisLog.error("AUDIO TRIGGER handler failed: ${it.message}") }
+
+        // Continuous listening: keep a recording session open and, if it fails,
+        // re-open it after a short backoff — the loop only ends when stop() is
+        // called, so Jarvis keeps listening indefinitely in the background.
+        while (running) {
+            var record: AudioRecord? = null
+            try {
+                record = AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufSize,
+                )
+                val buffer = ShortArray(bufSize / 2)
+                record.startRecording()
+                while (running) {
+                    val read = record.read(buffer, 0, buffer.size)
+                    if (read <= 0) continue
+                    val rms = rms(buffer, read)
+                    val now = System.currentTimeMillis()
+                    if (rms >= threshold && now - lastFired >= cooldownMs) {
+                        lastFired = now
+                        JarvisLog.action("AUDIO EVENT detected (level ${rms.toInt()})")
+                        runCatching { onActivity() }
+                            .onFailure { JarvisLog.error("AUDIO TRIGGER handler failed: ${it.message}") }
+                    }
                 }
+            } catch (e: Exception) {
+                JarvisLog.error("AUDIO TRIGGER session error: ${e.message}")
+            } finally {
+                runCatching { record?.stop() }
+                runCatching { record?.release() }
             }
-        } catch (e: Exception) {
-            JarvisLog.error("AUDIO TRIGGER loop error: ${e.message}")
-        } finally {
-            runCatching { record.stop() }
-            record.release()
+            // Transient failure while still enabled: back off, then re-open.
+            if (running) {
+                runCatching { Thread.sleep(1000) }
+            }
         }
     }
 

@@ -4,6 +4,7 @@ import android.content.Context
 import com.real3rr0r303yt.jarvis.agent.AppAutomationTool
 import com.real3rr0r303yt.jarvis.agent.JarvisAgentEngine
 import com.real3rr0r303yt.jarvis.agent.LlmBrainTool
+import com.real3rr0r303yt.jarvis.agent.SystemCheckTool
 import com.real3rr0r303yt.jarvis.agent.SystemControlTool
 import com.real3rr0r303yt.jarvis.agent.WebSearchTool
 import com.real3rr0r303yt.jarvis.agent.llm.LlmClient
@@ -15,6 +16,7 @@ import com.real3rr0r303yt.jarvis.core.JarvisPrefs
 import com.real3rr0r303yt.jarvis.service.JarvisAccessibilityService
 import com.real3rr0r303yt.jarvis.system.ElevatedShell
 import com.real3rr0r303yt.jarvis.system.SystemController
+import com.real3rr0r303yt.jarvis.tts.TtsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -30,6 +32,7 @@ import kotlinx.coroutines.withContext
  */
 class CommandProcessor(appContext: Context) {
 
+    private val appContext = appContext.applicationContext
     private val parser = IntentParser()
     private val system = SystemController(appContext)
     private val prefs = JarvisPrefs.get(appContext)
@@ -112,10 +115,14 @@ class CommandProcessor(appContext: Context) {
                 WebSearchTool(),
                 AppAutomationTool(::runRuleBased),
                 SystemControlTool(::runRuleBased),
+                SystemCheckTool(appContext),
                 LlmBrainTool(llm),
             ),
         )
-        return engine.run(input)
+        val answer = engine.run(input)
+        // Show in the HUD (already logged by the engine) and read it aloud.
+        TtsManager.speak(answer)
+        return answer
     }
 
     /** Offline rule-based path; also the executor the agent's device tools reuse. */
