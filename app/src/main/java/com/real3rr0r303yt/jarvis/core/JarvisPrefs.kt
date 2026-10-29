@@ -38,6 +38,16 @@ class JarvisPrefs private constructor(context: Context) {
         get() = prefs.getBoolean(KEY_AUDIO_TRIGGER, false)
         set(value) = prefs.edit().putBoolean(KEY_AUDIO_TRIGGER, value).apply()
 
+    /** Whether agent answers are read aloud via TTS. Default off. */
+    var ttsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_TTS, false)
+        set(value) = prefs.edit().putBoolean(KEY_TTS, value).apply()
+
+    /** Whether the floating overlay HUD is enabled. Default off. */
+    var overlayEnabled: Boolean
+        get() = prefs.getBoolean(KEY_OVERLAY, false)
+        set(value) = prefs.edit().putBoolean(KEY_OVERLAY, value).apply()
+
     /** When true, launches/automation are restricted to the whitelist. */
     var whitelistEnforced: Boolean
         get() = prefs.getBoolean(KEY_ENFORCE, false)
@@ -93,6 +103,8 @@ class JarvisPrefs private constructor(context: Context) {
         private const val KEY_API_KEY = "llm_api_key"
         private const val KEY_APP_TRIGGERS = "app_triggers"
         private const val KEY_AUDIO_TRIGGER = "audio_trigger_enabled"
+        private const val KEY_TTS = "tts_enabled"
+        private const val KEY_OVERLAY = "overlay_enabled"
 
         @Volatile
         private var INSTANCE: JarvisPrefs? = null

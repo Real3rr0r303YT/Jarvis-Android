@@ -116,6 +116,13 @@ Jarvis can react to events, not just typed commands:
 | **Voice Input** | `VoiceInput` wraps Android's on-device `SpeechRecognizer` with `EXTRA_PREFER_OFFLINE`, so spoken commands are transcribed locally and fed straight into the command processor. 🎙 button on the dashboard. |
 | **Settings / Customisation** | Compose settings screen: live permission status, an **app whitelist** (optionally enforced so Jarvis only touches apps you approve), and saved **custom shell commands** run through the elevated channel you enabled. |
 
+### 7. Voice Output, Overlay & Diagnostics (v1.1.0)
+- **Text-to-Speech** (`TtsManager`) — agent/LLM answers are shown in the action log **and read aloud** (toggle in Settings).
+- **Continuous voice listening** — `AudioTriggerManager` runs an uninterrupted background listening loop in the foreground service, re-opening the mic on transient failures instead of stopping after one burst.
+- **Smart Overlay HUD** (`OverlayHudService`) — a minimalist, draggable neon cyber chip over all apps; tap it for a quick voice command. Needs the draw-over-apps permission.
+- **Auto-Content-Drafting** — when a watched app (e.g. TikTok) opens, the generated draft is **copied to the clipboard** and shown as a notification.
+- **System Diagnostics Tool** (`SystemCheckTool`) — a ReAct agent tool reporting battery, RAM, CPU, network transport and service status, right in the terminal.
+
 ---
 
 ## 🗂️ Project Structure
@@ -135,11 +142,14 @@ app/src/main/java/com/real3rr0r303yt/jarvis/
 │   ├── JarvisAgentEngine.kt          # ReAct planner (Thought/Action/Observation)
 │   ├── JarvisTool.kt                 # tool interface + step model
 │   ├── Tools.kt                      # WebSearch/AppAutomation/SystemControl/LlmBrain
+│   ├── SystemCheckTool.kt            # diagnostics tool for the ReAct agent
 │   └── llm/LlmClient.kt              # OpenAI / Groq / Gemini client
 ├── trigger/
 │   ├── AppTriggerManager.kt          # foreground-app launch trigger (debounced)
-│   ├── AudioTriggerManager.kt        # background amplitude-based audio trigger
+│   ├── AudioTriggerManager.kt        # continuous background audio listener
 │   └── TriggerNotifier.kt            # surfaces trigger output as a notification
+├── tts/TtsManager.kt                 # text-to-speech output
+├── overlay/OverlayHudService.kt      # draggable floating overlay HUD
 ├── brain/
 │   ├── IntentParser.kt               # natural language -> actions
 │   ├── CommandProcessor.kt           # agent routing + rule-based pipeline

@@ -3,6 +3,7 @@ package com.real3rr0r303yt.jarvis
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -33,8 +34,10 @@ import com.real3rr0r303yt.jarvis.core.SystemStats
 import com.real3rr0r303yt.jarvis.service.JarvisAccessibilityService
 import com.real3rr0r303yt.jarvis.service.JarvisForegroundService
 import com.real3rr0r303yt.jarvis.service.JarvisNotificationListenerService
+import com.real3rr0r303yt.jarvis.overlay.OverlayHudService
 import com.real3rr0r303yt.jarvis.system.ElevatedShell
 import com.real3rr0r303yt.jarvis.trigger.AppTriggerManager
+import com.real3rr0r303yt.jarvis.tts.TtsManager
 import com.real3rr0r303yt.jarvis.ui.dashboard.DashboardScreen
 import com.real3rr0r303yt.jarvis.ui.settings.PermissionStatus
 import com.real3rr0r303yt.jarvis.ui.settings.SettingsScreen
@@ -62,6 +65,12 @@ class MainActivity : ComponentActivity() {
         processor = CommandProcessor(applicationContext)
         prefs = JarvisPrefs.get(applicationContext)
         requestBaselinePermissions()
+
+        // Re-attach the overlay HUD on launch if the user left it enabled and
+        // the permission is still granted.
+        if (prefs.overlayEnabled && OverlayHudService.canDraw(this)) {
+            OverlayHudService.start(this)
+        }
 
         setContent {
             JarvisTheme {
@@ -122,6 +131,33 @@ class MainActivity : ComponentActivity() {
         else JarvisForegroundService.stop(this)
     }
 
+    // --------------------------------------------------------- overlay HUD
+    /** Returns the effective overlay-enabled state after handling the toggle. */
+    private fun setOverlay(enable: Boolean): Boolean {
+        if (!enable) {
+            OverlayHudService.stop(this)
+            prefs.overlayEnabled = false
+            return false
+        }
+        if (!OverlayHudService.canDraw(this)) {
+            // Send the user to grant the draw-over-apps permission; leave it off
+            // until they come back and toggle again.
+            runCatching {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName"),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            JarvisLog.warn("OVERLAY needs the draw-over-apps permission — re-enable after granting")
+            return false
+        }
+        OverlayHudService.start(this)
+        prefs.overlayEnabled = true
+        return true
+    }
+
     private fun openSettings(action: String) {
         runCatching {
             startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -170,6 +206,8 @@ class MainActivity : ComponentActivity() {
         var provider by remember { mutableStateOf(prefs.llmProvider) }
         var apiKeySet by remember { mutableStateOf(prefs.llmApiKey.isNotBlank()) }
         var audioTrig by remember { mutableStateOf(prefs.audioTriggerEnabled) }
+        var ttsOn by remember { mutableStateOf(prefs.ttsEnabled) }
+        var overlayOn by remember { mutableStateOf(prefs.overlayEnabled) }
 
         var snapshot by remember { mutableStateOf(SystemStats.snapshot(context)) }
         LaunchedEffect(Unit) {
@@ -209,6 +247,8 @@ class MainActivity : ComponentActivity() {
                 appTriggers = appTriggers,
                 triggerPresets = AppTriggerManager.PRESETS.map { it.key to it.value },
                 audioTrigger = audioTrig,
+                ttsEnabled = ttsOn,
+                overlayEnabled = overlayOn,
                 appLabel = { pkg -> AppTriggerManager.label(pkg) },
                 onBack = { screen = Screen.DASHBOARD },
                 onToggleEnforce = { prefs.whitelistEnforced = it; enforce = it },
@@ -224,6 +264,8 @@ class MainActivity : ComponentActivity() {
                 onAddAppTrigger = prefs::addAppTrigger,
                 onRemoveAppTrigger = prefs::removeAppTrigger,
                 onToggleAudioTrigger = { prefs.audioTriggerEnabled = it; audioTrig = it },
+                onToggleTts = { prefs.ttsEnabled = it; TtsManager.enabled = it; ttsOn = it },
+                onToggleOverlay = { overlayOn = setOverlay(it) },
                 modifier = modifier,
             )
         }
