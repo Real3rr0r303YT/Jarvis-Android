@@ -67,6 +67,13 @@ Open Spotify
 - **Dynamic terminal log** streaming every executed action in
   `[HH:mm:ss] JARVIS@root:~# EXECUTE ...` style.
 
+### 4. Background, Voice & Customisation
+| Feature | Details |
+|---|---|
+| **Foreground Service** | `JarvisForegroundService` runs with an ongoing *"JARVIS Active — System Monitoring"* notification so Android won't kill the agent in the background. Toggle it from Settings; tap the notification to reopen the HUD. |
+| **Voice Input** | `VoiceInput` wraps Android's on-device `SpeechRecognizer` with `EXTRA_PREFER_OFFLINE`, so spoken commands are transcribed locally and fed straight into the command processor. 🎙 button on the dashboard. |
+| **Settings / Customisation** | Compose settings screen: live permission status, an **app whitelist** (optionally enforced so Jarvis only touches apps you approve), and saved **custom shell commands** run through the elevated channel you enabled. |
+
 ---
 
 ## 🗂️ Project Structure
@@ -77,22 +84,32 @@ app/src/main/java/com/real3rr0r303yt/jarvis/
 ├── JarvisApplication.kt
 ├── service/
 │   ├── JarvisAccessibilityService.kt  # on-screen automation core
-│   └── JarvisNotificationListenerService.kt
+│   ├── JarvisNotificationListenerService.kt
+│   └── JarvisForegroundService.kt     # background monitoring + notification
 ├── system/
 │   ├── SystemController.kt            # Wi-Fi / BT / volume / display / apps
 │   └── ElevatedShell.kt              # optional Shizuku / root channel
 ├── brain/
 │   ├── IntentParser.kt               # natural language -> actions
-│   ├── CommandProcessor.kt           # dispatches actions
+│   ├── CommandProcessor.kt           # dispatches actions + custom commands
+│   ├── VoiceInput.kt                 # offline SpeechRecognizer wrapper
 │   └── model/JarvisAction.kt
 ├── core/
 │   ├── JarvisLog.kt                  # terminal action log (StateFlow)
+│   ├── JarvisPrefs.kt                # whitelist + custom commands store
 │   └── SystemStats.kt                # dashboard telemetry
 └── ui/
     ├── theme/Theme.kt                # black + neon theme
     ├── components/HudComponents.kt
-    └── dashboard/DashboardScreen.kt
+    ├── dashboard/DashboardScreen.kt
+    └── settings/SettingsScreen.kt    # permissions, whitelist, commands
 ```
+
+## ⚙️ Continuous Integration
+
+`.github/workflows/android-release.yml` builds the release APK on every push
+and pull request to `main` (and on demand via *workflow_dispatch*), uploading
+`jarvis-ai-release-apk` as a build artifact.
 
 ---
 
@@ -125,8 +142,9 @@ itself:
 2. **Notification access** — `Settings → Notifications → Notification access →
    Jarvis-AI`. Required to read notifications and send inline replies. Tap
    **ENABLE NOTIF** in the app.
-3. **Runtime permissions** (prompted on first launch): `POST_NOTIFICATIONS`,
-   `BLUETOOTH_CONNECT`.
+3. **Runtime permissions** (prompted on first launch / first use):
+   `POST_NOTIFICATIONS`, `BLUETOOTH_CONNECT`, and `RECORD_AUDIO` (for voice
+   commands).
 4. **Write settings** (prompted when first changing brightness):
    `Settings → Apps → Jarvis-AI → Modify system settings`.
 5. **(Optional) Shizuku** — install the [Shizuku](https://shizuku.rikka.app/)

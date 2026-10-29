@@ -44,7 +44,10 @@ import com.real3rr0r303yt.jarvis.ui.theme.JarvisNeonDim
 fun DashboardScreen(
     snapshot: SystemSnapshot,
     log: List<LogLine>,
+    listening: Boolean,
     onCommand: (String) -> Unit,
+    onVoice: () -> Unit,
+    onOpenSettings: () -> Unit,
     onEnableAccessibility: () -> Unit,
     onEnableNotifications: () -> Unit,
     modifier: Modifier = Modifier,
@@ -59,19 +62,27 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         // Header
-        Text(
-            "JARVIS-AI",
-            color = JarvisNeon,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-        )
-        Text(
-            "SYSTEM AGENT // by Real3rr0r303YT",
-            color = JarvisNeonDim,
-            fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace,
-        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column {
+                Text(
+                    "JARVIS-AI",
+                    color = JarvisNeon,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Text(
+                    "SYSTEM AGENT // by Real3rr0r303YT",
+                    color = JarvisNeonDim,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            HudButton("⚙ CFG", onOpenSettings)
+        }
 
         // Service status pills
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -131,7 +142,25 @@ fun DashboardScreen(
                 unfocusedLabelColor = JarvisNeonDim,
             ),
         )
-        HudButton("EXECUTE", { if (command.isNotBlank()) { onCommand(command); command = "" } }, Modifier.fillMaxWidth())
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            HudButton(
+                "EXECUTE",
+                { if (command.isNotBlank()) { onCommand(command); command = "" } },
+                Modifier.weight(1f),
+            )
+            HudButton(if (listening) "● REC" else "🎙 VOICE", onVoice, Modifier.weight(1f))
+        }
+        if (listening) {
+            Text(
+                "JARVIS@root:~# listening...",
+                color = JarvisNeon,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
 
         // Terminal log
         Text(
