@@ -1,6 +1,14 @@
 package com.real3rr0r303yt.jarvis.brain
 
 import android.content.Context
+import com.real3rr0r303yt.jarvis.agent.AppAutomationTool
+import com.real3rr0r303yt.jarvis.agent.JarvisAgentEngine
+import com.real3rr0r303yt.jarvis.agent.LlmBrainTool
+import com.real3rr0r303yt.jarvis.agent.SystemControlTool
+import com.real3rr0r303yt.jarvis.agent.WebSearchTool
+import com.real3rr0r303yt.jarvis.agent.llm.LlmClient
+import com.real3rr0r303yt.jarvis.agent.llm.LlmConfig
+import com.real3rr0r303yt.jarvis.agent.llm.LlmProvider
 import com.real3rr0r303yt.jarvis.brain.model.JarvisAction
 import com.real3rr0r303yt.jarvis.core.JarvisLog
 import com.real3rr0r303yt.jarvis.core.JarvisPrefs
@@ -15,12 +23,24 @@ import kotlinx.coroutines.withContext
  * Jarvis' "brain": takes a natural-language line, parses it into actions, and
  * executes each one against the right subsystem. Returns a short, human-readable
  * summary for the HUD.
+ *
+ * When the autonomous agent is enabled in settings and an LLM API key is
+ * configured, [process] routes the command through the [JarvisAgentEngine]
+ * (ReAct planner + tools). Otherwise it uses the offline rule-based pipeline.
  */
 class CommandProcessor(appContext: Context) {
 
     private val parser = IntentParser()
     private val system = SystemController(appContext)
     private val prefs = JarvisPrefs.get(appContext)
+
+    /** Builds the current LLM config from settings, or null if unconfigured. */
+    private fun llmConfig(): LlmConfig? {
+        val key = prefs.llmApiKey
+        if (key.isBlank()) return null
+        val provider = runCatching { LlmProvider.valueOf(prefs.llmProvider) }.getOrDefault(LlmProvider.OPENAI)
+        return LlmConfig(provider = provider, apiKey = key)
+    }
 
     /** Runs a saved custom shell command via the elevated channel, if enabled. */
     suspend fun runRawCommand(command: String): String {
@@ -34,8 +54,40 @@ class CommandProcessor(appContext: Context) {
         return "Command executed"
     }
 
-    /** Parses and runs [input]. Suspends because screen automation needs pacing. */
+    /**
+     * Entry point for a user command. Routes to the autonomous agent when it is
+     * enabled and configured; otherwise runs the offline rule-based pipeline.
+     */
     suspend fun process(input: String): String {
+        val config = llmConfig()
+        return if (prefs.agentEnabled && config != null) {
+            runAgent(input, config)
+        } else {
+            if (prefs.agentEnabled && config == null) {
+                JarvisLog.warn("AGENT enabled but no API key set — using rule-based mode")
+            }
+            runRuleBased(input)
+        }
+    }
+
+    /** ReAct agent path: plans and executes sub-steps via tools. */
+    private suspend fun runAgent(input: String, config: LlmConfig): String {
+        JarvisLog.action("AGENT ENGAGED (${config.provider.label}) :: \"$input\"")
+        val llm = LlmClient(config)
+        val engine = JarvisAgentEngine(
+            llm = llm,
+            toolList = listOf(
+                WebSearchTool(),
+                AppAutomationTool(::runRuleBased),
+                SystemControlTool(::runRuleBased),
+                LlmBrainTool(llm),
+            ),
+        )
+        return engine.run(input)
+    }
+
+    /** Offline rule-based path; also the executor the agent's device tools reuse. */
+    suspend fun runRuleBased(input: String): String {
         val parsed = parser.parse(input)
         JarvisLog.info("PARSE \"$input\" -> ${parsed.actions.size} action(s)")
 

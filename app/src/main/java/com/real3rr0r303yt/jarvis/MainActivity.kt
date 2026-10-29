@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.real3rr0r303yt.jarvis.agent.llm.LlmProvider
 import com.real3rr0r303yt.jarvis.brain.CommandProcessor
 import com.real3rr0r303yt.jarvis.brain.VoiceInput
 import com.real3rr0r303yt.jarvis.core.JarvisLog
@@ -163,6 +164,9 @@ class MainActivity : ComponentActivity() {
         var screen by remember { mutableStateOf(Screen.DASHBOARD) }
         var foregroundOn by remember { mutableStateOf(false) }
         var enforce by remember { mutableStateOf(prefs.whitelistEnforced) }
+        var agentOn by remember { mutableStateOf(prefs.agentEnabled) }
+        var provider by remember { mutableStateOf(prefs.llmProvider) }
+        var apiKeySet by remember { mutableStateOf(prefs.llmApiKey.isNotBlank()) }
 
         var snapshot by remember { mutableStateOf(SystemStats.snapshot(context)) }
         LaunchedEffect(Unit) {
@@ -195,6 +199,10 @@ class MainActivity : ComponentActivity() {
                 whitelist = whitelist,
                 whitelistEnforced = enforce,
                 customCommands = customCommands,
+                agentEnabled = agentOn,
+                llmProvider = provider,
+                apiKeySet = apiKeySet,
+                providerOptions = LlmProvider.entries.map { it.name },
                 onBack = { screen = Screen.DASHBOARD },
                 onToggleEnforce = { prefs.whitelistEnforced = it; enforce = it },
                 onAddApp = prefs::addToWhitelist,
@@ -203,6 +211,9 @@ class MainActivity : ComponentActivity() {
                 onRemoveCommand = prefs::removeCustomCommand,
                 onRunCommand = onRunRaw,
                 onToggleForeground = { foregroundOn = it; onToggleForeground(it) },
+                onToggleAgent = { prefs.agentEnabled = it; agentOn = it },
+                onSelectProvider = { prefs.llmProvider = it; provider = it },
+                onSetApiKey = { prefs.llmApiKey = it; apiKeySet = it.isNotBlank() },
                 modifier = modifier,
             )
         }

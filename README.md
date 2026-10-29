@@ -67,7 +67,31 @@ Open Spotify
 - **Dynamic terminal log** streaming every executed action in
   `[HH:mm:ss] JARVIS@root:~# EXECUTE ...` style.
 
-### 4. Background, Voice & Customisation
+### 4. Autonomous Agent (ReAct + Tool Calling)
+Jarvis can plan and execute multi-step tasks on its own. When the agent is
+enabled (Settings) and an LLM API key is set, a command is routed through a
+**ReAct loop** (Thought → Action → Observation) driven by `JarvisAgentEngine`,
+which calls specialised tools implementing the `JarvisTool` interface:
+
+| Tool | Does |
+|---|---|
+| `WebSearchTool` | Keyless web lookup (DuckDuckGo Instant Answer) returning a text summary. |
+| `AppAutomationTool` | Opens apps, types, taps and navigates via `JarvisAccessibilityService`. |
+| `SystemControlTool` | Wi-Fi/Bluetooth/volume/brightness/battery-saver, plus `shell:` raw commands via the elevated channel. |
+| `LlmBrainTool` | Free-text reasoning: summaries, translations, Q&A. |
+
+Every step is streamed live to the HUD terminal:
+```
+JARVIS@root:~# INFO   AGENT THINKING: need current weather, search the web
+JARVIS@root:~# EXECUTE AGENT ACTION: web_search("Berlin weather today")
+JARVIS@root:~# INFO   AGENT RESULT: 12°C, light rain. Routing to app_automation...
+```
+
+Supported providers: **OpenAI**, **Groq** (OpenAI-compatible) and **Gemini**.
+The API key is stored **only on the device** and sent only to the provider you
+pick. Without a key, Jarvis falls back to the offline rule-based pipeline.
+
+### 5. Background, Voice & Customisation
 | Feature | Details |
 |---|---|
 | **Foreground Service** | `JarvisForegroundService` runs with an ongoing *"JARVIS Active — System Monitoring"* notification so Android won't kill the agent in the background. Toggle it from Settings; tap the notification to reopen the HUD. |
@@ -89,9 +113,14 @@ app/src/main/java/com/real3rr0r303yt/jarvis/
 ├── system/
 │   ├── SystemController.kt            # Wi-Fi / BT / volume / display / apps
 │   └── ElevatedShell.kt              # optional Shizuku / root channel
+├── agent/
+│   ├── JarvisAgentEngine.kt          # ReAct planner (Thought/Action/Observation)
+│   ├── JarvisTool.kt                 # tool interface + step model
+│   ├── Tools.kt                      # WebSearch/AppAutomation/SystemControl/LlmBrain
+│   └── llm/LlmClient.kt              # OpenAI / Groq / Gemini client
 ├── brain/
 │   ├── IntentParser.kt               # natural language -> actions
-│   ├── CommandProcessor.kt           # dispatches actions + custom commands
+│   ├── CommandProcessor.kt           # agent routing + rule-based pipeline
 │   ├── VoiceInput.kt                 # offline SpeechRecognizer wrapper
 │   └── model/JarvisAction.kt
 ├── core/

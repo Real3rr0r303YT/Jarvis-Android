@@ -50,6 +50,10 @@ fun SettingsScreen(
     whitelist: Set<String>,
     whitelistEnforced: Boolean,
     customCommands: Set<String>,
+    agentEnabled: Boolean,
+    llmProvider: String,
+    apiKeySet: Boolean,
+    providerOptions: List<String>,
     onBack: () -> Unit,
     onToggleEnforce: (Boolean) -> Unit,
     onAddApp: (String) -> Unit,
@@ -58,6 +62,9 @@ fun SettingsScreen(
     onRemoveCommand: (String) -> Unit,
     onRunCommand: (String) -> Unit,
     onToggleForeground: (Boolean) -> Unit,
+    onToggleAgent: (Boolean) -> Unit,
+    onSelectProvider: (String) -> Unit,
+    onSetApiKey: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -100,6 +107,36 @@ fun SettingsScreen(
                 )
                 NeonSwitch(status.foregroundRunning, onToggleForeground)
             }
+        }
+
+        // --- Autonomous agent ---
+        Section("AUTONOMOUS AGENT") {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Enable agent (ReAct + tools)",
+                    color = JarvisNeonDim,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                NeonSwitch(agentEnabled, onToggleAgent)
+            }
+            Hint("When on, complex commands are planned and executed autonomously using the LLM + tools (web, apps, system). Needs an API key below.")
+
+            Text("LLM PROVIDER", color = JarvisNeon, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                providerOptions.forEach { option ->
+                    val selected = option.equals(llmProvider, ignoreCase = true)
+                    NeonButton(if (selected) "[$option]" else option) { onSelectProvider(option) }
+                }
+            }
+
+            StatusRow("API key", apiKeySet)
+            AddRow("paste API key (stored on device only)", onSetApiKey)
+            Hint("The key is saved locally and sent only to the selected provider.")
         }
 
         // --- App whitelist ---
