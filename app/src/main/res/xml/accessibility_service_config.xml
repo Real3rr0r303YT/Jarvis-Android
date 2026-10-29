@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares what the Jarvis AccessibilityService observes and may do.
+  canPerformGestures enables automated taps/swipes; flagRetrieveInteractive-
+  WindowsInfo + flagReportViewIds let Jarvis read screen structure to locate
+  the elements a user's command refers to.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagReportViewIds|flagRetrieveInteractiveWindows|flagRequestTouchExplorationMode"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100"
+    android:settingsActivity="com.real3rr0r303yt.jarvis.MainActivity" />

@@ -1,0 +1,210 @@
+package com.real3rr0r303yt.jarvis
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.real3rr0r303yt.jarvis.brain.CommandProcessor
+import com.real3rr0r303yt.jarvis.brain.VoiceInput
+import com.real3rr0r303yt.jarvis.core.JarvisLog
+import com.real3rr0r303yt.jarvis.core.JarvisPrefs
+import com.real3rr0r303yt.jarvis.core.SystemStats
+import com.real3rr0r303yt.jarvis.service.JarvisAccessibilityService
+import com.real3rr0r303yt.jarvis.service.JarvisForegroundService
+import com.real3rr0r303yt.jarvis.service.JarvisNotificationListenerService
+import com.real3rr0r303yt.jarvis.system.ElevatedShell
+import com.real3rr0r303yt.jarvis.ui.dashboard.DashboardScreen
+import com.real3rr0r303yt.jarvis.ui.settings.PermissionStatus
+import com.real3rr0r303yt.jarvis.ui.settings.SettingsScreen
+import com.real3rr0r303yt.jarvis.ui.theme.JarvisTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/** Which HUD screen is showing. */
+private enum class Screen { DASHBOARD, SETTINGS }
+
+/**
+ * Single-activity host for the Jarvis HUD. Owns the [CommandProcessor], the
+ * telemetry refresh loop, voice input and simple screen navigation; the
+ * composable UI is otherwise stateless.
+ */
+class MainActivity : ComponentActivity() {
+
+    private lateinit var processor: CommandProcessor
+    private lateinit var prefs: JarvisPrefs
+    private var voice: VoiceInput? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        processor = CommandProcessor(applicationContext)
+        prefs = JarvisPrefs.get(applicationContext)
+        requestBaselinePermissions()
+
+        setContent {
+            JarvisTheme {
+                Scaffold(modifier = Modifier.fillMaxSize()) { inner ->
+                    JarvisApp(
+                        modifier = Modifier.padding(inner),
+                        onCommand = ::runCommand,
+                        onVoice = ::toggleVoice,
+                        onRunRaw = ::runRaw,
+                        onEnableAccessibility = { openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS) },
+                        onEnableNotifications = { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) },
+                        onToggleForeground = ::toggleForeground,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Runs a user command on the lifecycle scope so it survives recomposition. */
+    private fun runCommand(input: String) {
+        lifecycleScope.launch {
+            val summary = processor.process(input)
+            JarvisLog.info(summary)
+        }
+    }
+
+    private fun runRaw(command: String) {
+        lifecycleScope.launch { processor.runRawCommand(command) }
+    }
+
+    // ------------------------------------------------------------- voice input
+    private var listeningState = mutableStateOf(false)
+
+    private fun toggleVoice() {
+        if (listeningState.value) {
+            voice?.stop()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1002)
+            return
+        }
+        if (voice == null) {
+            voice = VoiceInput(
+                context = this,
+                onResult = { spoken -> runCommand(spoken) },
+                onState = { active -> listeningState.value = active },
+            )
+        }
+        voice?.start()
+    }
+
+    // --------------------------------------------------------- foreground svc
+    private fun toggleForeground(enable: Boolean) {
+        if (enable) JarvisForegroundService.start(this)
+        else JarvisForegroundService.stop(this)
+    }
+
+    private fun openSettings(action: String) {
+        runCatching {
+            startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { JarvisLog.error("Could not open settings: ${it.message}") }
+    }
+
+    private fun requestBaselinePermissions() {
+        val perms = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+        if (perms.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, perms.toTypedArray(), 1001)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        voice?.destroy()
+    }
+
+    @Composable
+    private fun JarvisApp(
+        modifier: Modifier,
+        onCommand: (String) -> Unit,
+        onVoice: () -> Unit,
+        onRunRaw: (String) -> Unit,
+        onEnableAccessibility: () -> Unit,
+        onEnableNotifications: () -> Unit,
+        onToggleForeground: (Boolean) -> Unit,
+    ) {
+        val context = LocalContext.current
+        val log by JarvisLog.lines.collectAsState()
+        val whitelist by prefs.whitelist.collectAsState()
+        val customCommands by prefs.customCommands.collectAsState()
+        val listening by listeningState
+        var screen by remember { mutableStateOf(Screen.DASHBOARD) }
+        var foregroundOn by remember { mutableStateOf(false) }
+        var enforce by remember { mutableStateOf(prefs.whitelistEnforced) }
+
+        var snapshot by remember { mutableStateOf(SystemStats.snapshot(context)) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                snapshot = SystemStats.snapshot(context)
+                delay(1000)
+            }
+        }
+
+        when (screen) {
+            Screen.DASHBOARD -> DashboardScreen(
+                snapshot = snapshot,
+                log = log,
+                listening = listening,
+                onCommand = onCommand,
+                onVoice = onVoice,
+                onOpenSettings = { screen = Screen.SETTINGS },
+                onEnableAccessibility = onEnableAccessibility,
+                onEnableNotifications = onEnableNotifications,
+                modifier = modifier,
+            )
+
+            Screen.SETTINGS -> SettingsScreen(
+                status = PermissionStatus(
+                    accessibility = JarvisAccessibilityService.isConnected,
+                    notifications = JarvisNotificationListenerService.isConnected,
+                    elevated = ElevatedShell.isAvailable(),
+                    foregroundRunning = foregroundOn,
+                ),
+                whitelist = whitelist,
+                whitelistEnforced = enforce,
+                customCommands = customCommands,
+                onBack = { screen = Screen.DASHBOARD },
+                onToggleEnforce = { prefs.whitelistEnforced = it; enforce = it },
+                onAddApp = prefs::addToWhitelist,
+                onRemoveApp = prefs::removeFromWhitelist,
+                onAddCommand = prefs::addCustomCommand,
+                onRemoveCommand = prefs::removeCustomCommand,
+                onRunCommand = onRunRaw,
+                onToggleForeground = { foregroundOn = it; onToggleForeground(it) },
+                modifier = modifier,
+            )
+        }
+    }
+}
