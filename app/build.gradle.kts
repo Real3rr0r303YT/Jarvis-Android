@@ -12,8 +12,8 @@ android {
         applicationId = "com.real3rr0r303yt.jarvis"
         minSdk = 26          // Android 8.0 — required for modern AccessibilityService gesture APIs
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.1.2"
+        versionCode = 7
+        versionName = "1.1.3"
 
         vectorDrawables { useSupportLibrary = true }
     }
