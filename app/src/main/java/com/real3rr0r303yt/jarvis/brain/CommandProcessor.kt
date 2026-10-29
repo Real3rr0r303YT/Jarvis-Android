@@ -42,6 +42,38 @@ class CommandProcessor(appContext: Context) {
         return LlmConfig(provider = provider, apiKey = key)
     }
 
+    /**
+     * Proactive content trigger: when a watched app comes to the foreground,
+     * generate three fresh short-video hook ideas tailored to that app. Uses the
+     * configured LLM when available; otherwise returns an offline template so the
+     * trigger still produces something useful without a key.
+     */
+    suspend fun runContentTrigger(appLabel: String): String {
+        val config = llmConfig()
+        val system = "You are Jarvis, a short-form content assistant for the creator Real3rr0r303YT. " +
+            "Be punchy, specific and original."
+        val user = "The creator just opened $appLabel. Generate exactly 3 fresh, scroll-stopping " +
+            "short-video hook ideas tailored to $appLabel. Give one hook per line, no preamble."
+        return if (config != null) {
+            JarvisLog.action("CONTENT AGENT ($appLabel) via ${config.provider.label}")
+            try {
+                LlmClient(config).complete(system, user)
+            } catch (e: Exception) {
+                JarvisLog.error("CONTENT AGENT failed: ${e.message}")
+                fallbackHooks(appLabel)
+            }
+        } else {
+            JarvisLog.warn("CONTENT AGENT — no API key set; using offline template")
+            fallbackHooks(appLabel)
+        }
+    }
+
+    private fun fallbackHooks(app: String): String = listOf(
+        "POV: the one $app setting nobody told you about (but changes everything).",
+        "I tried $app for 24h doing only what the algorithm wanted — here's what broke.",
+        "3 things I'd tell my younger self before posting my first $app video.",
+    ).joinToString("\n")
+
     /** Runs a saved custom shell command via the elevated channel, if enabled. */
     suspend fun runRawCommand(command: String): String {
         if (!ElevatedShell.isAvailable()) {
