@@ -57,15 +57,18 @@ class CommandProcessor(appContext: Context) {
             if (allowed(action.query)) system.launchApp(action.query) else blocked(action.query)
 
         is JarvisAction.ComposeMessage -> {
-            if (action.appQuery.isNotBlank() && !allowed(action.appQuery)) return blocked(action.appQuery)
-            // Open the target app, wait for it, then type and leave sending to
-            // the user (we type the text; we do not auto-fire the send button
-            // unless the user explicitly asked to "send").
-            val launched = if (action.appQuery.isNotBlank()) system.launchApp(action.appQuery) else true
-            if (launched) delay(1200)
-            JarvisAccessibilityService.instance?.typeText(action.text) ?: run {
-                JarvisLog.error("COMPOSE — accessibility service not enabled")
-                false
+            if (action.appQuery.isNotBlank() && !allowed(action.appQuery)) {
+                blocked(action.appQuery)
+            } else {
+                // Open the target app, wait for it, then type and leave sending to
+                // the user (we type the text; we do not auto-fire the send button
+                // unless the user explicitly asked to "send").
+                val launched = if (action.appQuery.isNotBlank()) system.launchApp(action.appQuery) else true
+                if (launched) delay(1200)
+                JarvisAccessibilityService.instance?.typeText(action.text) ?: run {
+                    JarvisLog.error("COMPOSE — accessibility service not enabled")
+                    false
+                }
             }
         }
 
