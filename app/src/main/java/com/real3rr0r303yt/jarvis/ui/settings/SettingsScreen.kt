@@ -54,6 +54,10 @@ fun SettingsScreen(
     llmProvider: String,
     apiKeySet: Boolean,
     providerOptions: List<String>,
+    appTriggers: Set<String>,
+    triggerPresets: List<Pair<String, String>>,
+    audioTrigger: Boolean,
+    appLabel: (String) -> String,
     onBack: () -> Unit,
     onToggleEnforce: (Boolean) -> Unit,
     onAddApp: (String) -> Unit,
@@ -65,6 +69,9 @@ fun SettingsScreen(
     onToggleAgent: (Boolean) -> Unit,
     onSelectProvider: (String) -> Unit,
     onSetApiKey: (String) -> Unit,
+    onAddAppTrigger: (String) -> Unit,
+    onRemoveAppTrigger: (String) -> Unit,
+    onToggleAudioTrigger: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -137,6 +144,41 @@ fun SettingsScreen(
             StatusRow("API key", apiKeySet)
             AddRow("paste API key (stored on device only)", onSetApiKey)
             Hint("The key is saved locally and sent only to the selected provider.")
+        }
+
+        // --- Proactive triggers ---
+        Section("PROACTIVE TRIGGERS") {
+            Text("APP-LAUNCH TRIGGERS", color = JarvisNeon, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            Hint("When a watched app opens, Jarvis generates fresh content ideas and shows them as a notification. Needs the Accessibility service on.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                triggerPresets.forEach { (pkg, name) ->
+                    val on = pkg in appTriggers
+                    NeonButton(if (on) "[$name]" else "+ $name") {
+                        if (on) onRemoveAppTrigger(pkg) else onAddAppTrigger(pkg)
+                    }
+                }
+            }
+            AddRow("custom package, e.g. com.example.app", onAddAppTrigger)
+            if (appTriggers.isEmpty()) {
+                Hint("No app-launch triggers set.")
+            } else {
+                appTriggers.forEach { pkg -> Chip(appLabel(pkg)) { onRemoveAppTrigger(pkg) } }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Audio-activity trigger",
+                    color = JarvisNeonDim,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                NeonSwitch(audioTrigger, onToggleAudioTrigger)
+            }
+            Hint("Background mic listens for sound activity (amplitude-based) while monitoring is on. Requires mic permission; toggle background monitoring to apply.")
         }
 
         // --- App whitelist ---

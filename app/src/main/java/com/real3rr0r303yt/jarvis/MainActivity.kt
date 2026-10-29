@@ -34,6 +34,7 @@ import com.real3rr0r303yt.jarvis.service.JarvisAccessibilityService
 import com.real3rr0r303yt.jarvis.service.JarvisForegroundService
 import com.real3rr0r303yt.jarvis.service.JarvisNotificationListenerService
 import com.real3rr0r303yt.jarvis.system.ElevatedShell
+import com.real3rr0r303yt.jarvis.trigger.AppTriggerManager
 import com.real3rr0r303yt.jarvis.ui.dashboard.DashboardScreen
 import com.real3rr0r303yt.jarvis.ui.settings.PermissionStatus
 import com.real3rr0r303yt.jarvis.ui.settings.SettingsScreen
@@ -160,6 +161,7 @@ class MainActivity : ComponentActivity() {
         val log by JarvisLog.lines.collectAsState()
         val whitelist by prefs.whitelist.collectAsState()
         val customCommands by prefs.customCommands.collectAsState()
+        val appTriggers by prefs.appTriggers.collectAsState()
         val listening by listeningState
         var screen by remember { mutableStateOf(Screen.DASHBOARD) }
         var foregroundOn by remember { mutableStateOf(false) }
@@ -167,6 +169,7 @@ class MainActivity : ComponentActivity() {
         var agentOn by remember { mutableStateOf(prefs.agentEnabled) }
         var provider by remember { mutableStateOf(prefs.llmProvider) }
         var apiKeySet by remember { mutableStateOf(prefs.llmApiKey.isNotBlank()) }
+        var audioTrig by remember { mutableStateOf(prefs.audioTriggerEnabled) }
 
         var snapshot by remember { mutableStateOf(SystemStats.snapshot(context)) }
         LaunchedEffect(Unit) {
@@ -203,6 +206,10 @@ class MainActivity : ComponentActivity() {
                 llmProvider = provider,
                 apiKeySet = apiKeySet,
                 providerOptions = LlmProvider.entries.map { it.name },
+                appTriggers = appTriggers,
+                triggerPresets = AppTriggerManager.PRESETS.map { it.key to it.value },
+                audioTrigger = audioTrig,
+                appLabel = { pkg -> AppTriggerManager.label(pkg) },
                 onBack = { screen = Screen.DASHBOARD },
                 onToggleEnforce = { prefs.whitelistEnforced = it; enforce = it },
                 onAddApp = prefs::addToWhitelist,
@@ -214,6 +221,9 @@ class MainActivity : ComponentActivity() {
                 onToggleAgent = { prefs.agentEnabled = it; agentOn = it },
                 onSelectProvider = { prefs.llmProvider = it; provider = it },
                 onSetApiKey = { prefs.llmApiKey = it; apiKeySet = it.isNotBlank() },
+                onAddAppTrigger = prefs::addAppTrigger,
+                onRemoveAppTrigger = prefs::removeAppTrigger,
+                onToggleAudioTrigger = { prefs.audioTriggerEnabled = it; audioTrig = it },
                 modifier = modifier,
             )
         }

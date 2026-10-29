@@ -23,6 +23,21 @@ class JarvisPrefs private constructor(context: Context) {
     private val _customCommands = MutableStateFlow(readSet(KEY_COMMANDS))
     val customCommands: StateFlow<Set<String>> = _customCommands
 
+    /** Package names that, when brought to the foreground, fire a proactive trigger. */
+    private val _appTriggers = MutableStateFlow(readSet(KEY_APP_TRIGGERS))
+    val appTriggers: StateFlow<Set<String>> = _appTriggers
+
+    fun addAppTrigger(pkg: String) = mutate(KEY_APP_TRIGGERS, _appTriggers) { it + pkg.trim() }
+    fun removeAppTrigger(pkg: String) = mutate(KEY_APP_TRIGGERS, _appTriggers) { it - pkg }
+
+    /** True when at least one app-launch trigger is configured. */
+    val appTriggersActive: Boolean get() = _appTriggers.value.isNotEmpty()
+
+    /** Whether the background audio-activity trigger is enabled. Default off. */
+    var audioTriggerEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUDIO_TRIGGER, false)
+        set(value) = prefs.edit().putBoolean(KEY_AUDIO_TRIGGER, value).apply()
+
     /** When true, launches/automation are restricted to the whitelist. */
     var whitelistEnforced: Boolean
         get() = prefs.getBoolean(KEY_ENFORCE, false)
@@ -76,6 +91,8 @@ class JarvisPrefs private constructor(context: Context) {
         private const val KEY_AGENT = "agent_enabled"
         private const val KEY_PROVIDER = "llm_provider"
         private const val KEY_API_KEY = "llm_api_key"
+        private const val KEY_APP_TRIGGERS = "app_triggers"
+        private const val KEY_AUDIO_TRIGGER = "audio_trigger_enabled"
 
         @Volatile
         private var INSTANCE: JarvisPrefs? = null

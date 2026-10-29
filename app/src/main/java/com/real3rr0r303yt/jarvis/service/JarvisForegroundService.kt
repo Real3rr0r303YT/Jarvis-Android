@@ -14,6 +14,9 @@ import androidx.core.app.NotificationCompat
 import com.real3rr0r303yt.jarvis.MainActivity
 import com.real3rr0r303yt.jarvis.R
 import com.real3rr0r303yt.jarvis.core.JarvisLog
+import com.real3rr0r303yt.jarvis.core.JarvisPrefs
+import com.real3rr0r303yt.jarvis.trigger.AudioTriggerManager
+import com.real3rr0r303yt.jarvis.trigger.TriggerNotifier
 
 /**
  * Keeps Jarvis alive in the background by running as a foreground service with
@@ -24,6 +27,8 @@ import com.real3rr0r303yt.jarvis.core.JarvisLog
  * reopens the HUD. Start/stop is driven by the user from the dashboard.
  */
 class JarvisForegroundService : Service() {
+
+    private var audio: AudioTriggerManager? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -41,16 +46,35 @@ class JarvisForegroundService : Service() {
     private fun startInForeground() {
         createChannel()
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-            )
+        val audioOn = JarvisPrefs.get(this).audioTriggerEnabled
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            if (audioOn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
         JarvisLog.info("Foreground service started — background monitoring active")
+
+        if (audioOn) startAudioTrigger()
+    }
+
+    private fun startAudioTrigger() {
+        val manager = AudioTriggerManager(
+            context = this,
+            onActivity = {
+                TriggerNotifier.show(this, "Jarvis · audio event", "Detected audio activity nearby.")
+            },
+        )
+        if (manager.hasPermission()) {
+            manager.start()
+            audio = manager
+        } else {
+            JarvisLog.warn("AUDIO TRIGGER enabled but RECORD_AUDIO not granted — skipping")
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -92,6 +116,8 @@ class JarvisForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        audio?.stop()
+        audio = null
         JarvisLog.info("Foreground service stopped")
     }
 

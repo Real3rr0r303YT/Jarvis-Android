@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.real3rr0r303yt.jarvis.core.JarvisLog
+import com.real3rr0r303yt.jarvis.trigger.AppTriggerManager
 
 /**
  * The automation core. Once the user enables it in
@@ -37,9 +38,14 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Event-driven observation is available here if needed; the command
-        // processor works on demand against the live window, so we keep this
-        // lightweight and do not retain any screen content.
+        // We act only on foreground-app changes, feeding the package name to the
+        // proactive app-launch trigger. We do not retain any screen content.
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString()
+            if (pkg != null && pkg != packageName) {
+                AppTriggerManager.onForegroundApp(this, pkg)
+            }
+        }
     }
 
     override fun onInterrupt() {

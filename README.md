@@ -91,7 +91,25 @@ Supported providers: **OpenAI**, **Groq** (OpenAI-compatible) and **Gemini**.
 The API key is stored **only on the device** and sent only to the provider you
 pick. Without a key, Jarvis falls back to the offline rule-based pipeline.
 
-### 5. Background, Voice & Customisation
+### 5. Proactive Event Triggers
+Jarvis can react to events, not just typed commands:
+
+- **App-launch trigger** (`AppTriggerManager`) — the `JarvisAccessibilityService`
+  watches `TYPE_WINDOW_STATE_CHANGED`; when a watched package comes to the
+  foreground (e.g. TikTok `com.zhiliaoapp.musically`), Jarvis fires the content
+  agent to generate **3 fresh short-video hook ideas** and shows them as a
+  notification. Per-package debounced so it won't re-fire on every window change.
+- **Audio-activity trigger** (`AudioTriggerManager`) — a lightweight,
+  amplitude-based mic listener running inside the foreground service; on
+  sustained sound it raises an event (the hook point for a future wake-word /
+  keyphrase model). Off by default.
+- Configure both in **Settings → Proactive Triggers** (presets for
+  TikTok/Instagram/YouTube, plus custom package names, and the audio toggle).
+
+> Background mic use runs under a `microphone` foreground-service type with the
+> persistent monitoring notification visible, and is opt-in.
+
+### 6. Background, Voice & Customisation
 | Feature | Details |
 |---|---|
 | **Foreground Service** | `JarvisForegroundService` runs with an ongoing *"JARVIS Active — System Monitoring"* notification so Android won't kill the agent in the background. Toggle it from Settings; tap the notification to reopen the HUD. |
@@ -118,6 +136,10 @@ app/src/main/java/com/real3rr0r303yt/jarvis/
 │   ├── JarvisTool.kt                 # tool interface + step model
 │   ├── Tools.kt                      # WebSearch/AppAutomation/SystemControl/LlmBrain
 │   └── llm/LlmClient.kt              # OpenAI / Groq / Gemini client
+├── trigger/
+│   ├── AppTriggerManager.kt          # foreground-app launch trigger (debounced)
+│   ├── AudioTriggerManager.kt        # background amplitude-based audio trigger
+│   └── TriggerNotifier.kt            # surfaces trigger output as a notification
 ├── brain/
 │   ├── IntentParser.kt               # natural language -> actions
 │   ├── CommandProcessor.kt           # agent routing + rule-based pipeline
