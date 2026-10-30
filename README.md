@@ -237,7 +237,7 @@ to confirm via the relevant system screen.
 
 If Jarvis-AI is useful to you, you can support development here:
 
-**[☕ Buy Me a Coffee → https://www.buymeacoffee.com/real3rr0r303yt](https://www.buymeacoffee.com/real3rr0r303yt)**
+**[☕ Buy Me a Coffee → https://buymeacoffee.com/3rr0r303YT](https://buymeacoffee.com/3rr0r303YT)**
 
 ---
 
@@ -255,3 +255,7 @@ the terms of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later
 version. This program is distributed WITHOUT ANY WARRANTY.
 ```
+
+---
+
+<p align="center"><b>Made by <a href="https://github.com/Real3rr0r303YT">Real3rr0r303YT</a></b> · GPL-3.0</p>
